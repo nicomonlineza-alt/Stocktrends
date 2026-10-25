@@ -17,3 +17,19 @@
 2. Connect Twelve Data through a secure server-side endpoint without committing the API key.
 3. Replace illustrative values only when verified live quote data is available.
 4. Implement versioned daily selection records and evaluation on unseen data.
+
+  
+## 2026-10-25 — Prototype v0.2 committed
+- Expanded the illustrative candidate universe to ten stocks.
+- Added transparent demo ranking formula (momentum 35%, relative strength 30%, volume 20%, volatility penalty 15%).
+- Added daily pick snapshots keyed to the New York calendar date; prior dates are retained in local storage.
+- Added prediction-log screen with rank, reference price, score, direction, and manual outcome controls.
+- Added portfolio breakdown, average-cost positions, adjustable paper-trade quantity, and JSON export.
+- Updated README and strategy documentation to state clearly that scores and prices are illustrative, not live data or a connected AI.
+- GitHub commits made on `main`; no Vercel deployment was attempted, per project workflow.
+- Build verification remains outstanding because no build runner was executed in this GitHub-only phase.
+
+## Next phase
+1. Run `npm install` and `npm run build` in a project environment; fix any compile issues before adding new features.
+2. Integrate Twelve Data through a server-side endpoint with secrets held in environment variables.
+3. Replace manual outcome marking with verified, timestamped outcome evaluation and persistent prediction storage.
