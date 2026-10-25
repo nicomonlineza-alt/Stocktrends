@@ -76,9 +76,10 @@ export default function App() {
   // Lock the daily list once per New York calendar day. Existing records are never overwritten.
   useEffect(() => {
     const key = todayKey();
-    if (!snapshots.some(snapshot => snapshot.id === key)) {
-      setSnapshots(previous => [...previous, makeSnapshot()].sort((a, b) => a.id.localeCompare(b.id)));
-    }
+    setSnapshots(previous => previous.some(snapshot => snapshot.id === key)
+      ? previous
+      : [...previous, makeSnapshot()].sort((a, b) => a.id.localeCompare(b.id)));
+    // The updater also guards against React StrictMode re-running mount effects.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
