@@ -178,7 +178,7 @@ export default function App() {
       <div className="notice-bar"><ShieldCheck size={17} /><span><strong>Paper trading only.</strong> Prices and features are illustrative. Daily selections are saved locally and are not live AI predictions.</span></div>
       {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notification"><X size={16} /></button></div>}
 
-      <section className="welcome-row"><div><div className="eyebrow">DAILY RESEARCH BRIEFING · {todayKey()}</div><h2>Five picks. <span>One scorecard.</span></h2><p>Ranked candidates, recorded decisions and a paper-trading ledger.</p></div><div className="welcome-actions"><button className="secondary-button" onClick={exportData}><ExternalLink size={15} /> Export data</button><button className="primary-button" onClick={createTodayPicks}><Target size={16} /> Lock today's 5</button></div></section>
+      <section className="welcome-row"><div><div className="eyebrow">DAILY RESEARCH BRIEFING · {todayKey()}</div><h2>Five picks. <span>One scorecard.</span></h2><p>Ranked candidates, recorded decisions and a paper-trading ledger.</p></div><div className="welcome-actions"><button className="secondary-button" onClick={exportData}><ExternalLink size={15} /> Export data</button><button className="primary-button" onClick={createTodayPicks} disabled={Boolean(currentSnapshot)}><Target size={16} /> {currentSnapshot ? "Today’s 5 locked" : "Lock today’s 5"}</button></div></section>
 
       <section className="stats-grid">
         <StatCard label="Paper portfolio" value={money(portfolioValue)} detail={`Starting cash: ${money(STARTING_CASH)}`} icon={<Wallet size={18} />} />
