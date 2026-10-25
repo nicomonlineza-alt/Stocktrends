@@ -5,3 +5,38 @@
 @media(max-width:1150px){.main-content{padding:26px 24px;margin-left:210px}.sidebar{width:210px}.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bottom-grid{grid-template-columns:1fr}.welcome-row h2{font-size:25px}}
 @media(max-width:720px){.sidebar{position:static;width:auto;height:auto;padding:15px 16px 10px;border-right:0;border-bottom:1px solid var(--line)}.brand{margin:0 0 14px;font-size:19px}.brand-mark{width:36px;height:36px}.sidebar .nav-label,.sidebar-bottom{display:none}.sidebar{display:block}.sidebar .nav-item{display:inline-flex;width:auto;padding:9px 10px;margin:0 3px 0 0;font-size:10px;gap:6px}.sidebar .nav-item svg{width:15px}.main-content{margin-left:0;padding:20px 14px}.topbar{padding-bottom:18px}.welcome-row{align-items:flex-start;flex-direction:column;padding:25px 0 19px}.welcome-row h2{font-size:25px}.stats-grid{gap:9px}.stat-card{padding:13px}.stat-top{font-size:10px}.stat-icon{width:28px;height:28px}.stat-value{font-size:20px;margin-top:12px}.stat-detail{font-size:9px}.panel-heading{padding:17px 15px 14px}.panel-heading h3{font-size:15px}.subtle-label{font-size:9px}.panel-footer{padding:12px 15px}.bottom-grid{gap:13px}.footer{align-items:flex-start;flex-direction:column}.notice-bar{align-items:flex-start;line-height:1.6}.modal-metrics{gap:5px}.modal-metrics>div{padding:9px}.modal-metrics strong{font-size:11px}}
 @media(max-width:390px){.sidebar .nav-item{font-size:0;padding:10px}.sidebar .nav-item svg{width:18px;height:18px}.stats-grid{grid-template-columns:1fr 1fr}.stat-value{font-size:18px}.demo-badge{font-size:8px}.welcome-row h2{font-size:22px}}
+
+
+/* Prototype v0.2 additions */
+.welcome-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.secondary-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 13px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.035);color:#c0ccdc;font-size:11px;font-weight:600;white-space:nowrap}
+.secondary-button:hover{border-color:rgba(97,228,210,.35);color:#e5fffa}
+.portfolio-breakdown{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:0 21px 16px}
+.portfolio-breakdown>div{padding:12px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.018)}
+.portfolio-breakdown span{display:block;color:#8795aa;font-size:10px;margin-bottom:8px}
+.portfolio-breakdown strong{font:600 16px 'Space Grotesk',sans-serif;overflow-wrap:anywhere}
+.chart-placeholder.compact{position:relative;min-height:90px;margin:0 21px 17px;border:1px dashed rgba(160,180,210,.15);border-radius:9px;display:flex;flex-direction:row;gap:10px;padding:15px;color:#8290a5}
+.chart-placeholder.compact svg{flex-shrink:0;color:var(--cyan)}
+.quantity-control{display:flex;align-items:center;gap:8px;color:#8a98ad;font-size:10px}
+.quantity-control input{width:76px;padding:8px;border:1px solid var(--line);border-radius:7px;background:#0b1220;color:#edf5ff;font:600 12px 'DM Sans',sans-serif}
+.snapshot-list{padding:0 18px 18px}
+.snapshot-card{margin:0 0 14px;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:rgba(3,8,15,.18)}
+.snapshot-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:15px 17px;background:rgba(255,255,255,.018)}
+.snapshot-head strong{display:block;font:600 14px 'Space Grotesk',sans-serif}
+.snapshot-head small{display:block;margin-top:5px;color:#8290a5;font-size:9px}
+.snapshot-note{margin:0;padding:11px 16px;border-top:1px solid var(--line);color:#8996aa;font-size:10px;line-height:1.6}
+.outcome-actions{display:flex;gap:5px}
+.outcome-actions button{padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:rgba(255,255,255,.04);color:#c1cddd;font-size:9px}
+.outcome-actions button:first-child{color:#7be1b6;border-color:#69e5a329}
+.outcome-actions button:last-child{color:#ff9aa5;border-color:#ff7d8c29}
+.reset-button{margin:0;padding:5px 0}
+.panel-footer .reset-button{margin:0}
+@media(max-width:720px){
+ .welcome-actions{width:100%}.welcome-actions button{flex:1}
+ .portfolio-breakdown{padding:0 15px 14px;gap:7px}
+ .portfolio-breakdown>div{padding:10px}
+ .portfolio-breakdown strong{font-size:14px}
+ .snapshot-list{padding:0 9px 12px}
+ .snapshot-head{align-items:flex-start;flex-direction:column}
+ .quantity-control{margin-left:auto}
+}
