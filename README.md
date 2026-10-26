@@ -12,10 +12,11 @@ Stocktrends is an educational stock-research prototype focused on a five-stock d
 - Simulated cash, share positions, average cost, buy/sell ledger, and account reset.
 - Export of prediction records and paper-trading data as JSON.
 - Company research links.
+- Initial server-side Twelve Data endpoint scaffold at `/api/market-data`, with symbol/interval validation and provider error handling.
 
 ## Important limitations
 
-**This version does not use live market data and does not contain a connected AI model.** Prices, day changes, feature values, scores, and forecast bias are illustrative sample data for prototyping only. Manually marked outcomes are not a verified backtest. Do not use this prototype to make investment decisions.
+**The current dashboard still uses illustrative sample data and does not yet display live Twelve Data prices or a connected AI model.** The server-side endpoint scaffold is committed, but it needs a private `TWELVE_DATA_API_KEY` environment variable in the hosting environment and frontend integration before live data will appear. Prices, day changes, feature values, scores, and forecast bias currently shown in the dashboard are illustrative only. Manually marked outcomes are not a verified backtest. Do not use this prototype to make investment decisions.
 
 The browser stores the paper account and prediction log locally on that device/browser. Data is not yet synced to a server, so clearing browser storage or switching devices will not carry it over.
 
@@ -28,21 +29,19 @@ Requires Node.js 18 or newer.
 ```bash
 npm install
 npm run dev
-```
-
-Create a production build with:
-
-```bash
 npm run build
 ```
 
+The `.env.example` file documents the required variable name only; it does not contain a real key. For a local serverless-function test, use a local Vercel development environment and set `TWELVE_DATA_API_KEY` privately in your local environment. Do not commit a real `.env` file.
+
 ## Next milestones
 
-1. Verify production build and improve prototype behaviour.
-2. Connect Twelve Data using a secure server-side endpoint; keep API keys in environment variables.
+1. Verify production build and endpoint behaviour.
+2. Configure the private Twelve Data key in the hosting environment and connect the frontend to the server-side endpoint.
 3. Replace sample values only with timestamped, verified market data and visible stale/error states.
-4. Lock daily predictions with reference quotes, forecast horizon, strategy version, and data provenance.
-5. Automatically evaluate outcomes against verified future prices; add fees, drawdown, benchmark comparisons, and out-of-sample testing.
-6. Deploy only after the GitHub prototype is stable.
+4. Analyse the latest 21 completed candles and explain the factors behind each candidate score.
+5. Lock daily selections with reference quotes, forecast horizon, strategy version, and data provenance.
+6. Automatically evaluate outcomes against verified future prices; add fees, drawdown, benchmark comparisons, and out-of-sample testing.
+7. Deploy only after the GitHub prototype is stable.
 
 See [PROJECT_PLAN.md](./PROJECT_PLAN.md), [STRATEGY.md](./STRATEGY.md), and [docs/progress-log.md](./docs/progress-log.md).
