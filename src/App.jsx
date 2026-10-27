@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, ArrowDownRight, ArrowUpRight, BarChart3, BrainCircuit, CircleHelp,
-  ExternalLink, Eye, LayoutDashboard, RefreshCw, ShieldCheck, Sparkles,
-  TrendingUp, Wallet, X, Clock3, Target, History, RotateCcw
+  ExternalLink, Eye, LayoutDashboard, ShieldCheck, Sparkles,
+  TrendingUp, Wallet, X, Clock3, Target, History, RotateCcw, BookOpen
 } from 'lucide-react';
 
-const STARTING_CASH = 100000;
+const STARTING_CASH = 100000; // Existing optional paper-trading account; separate from the daily R100 challenge.\nconst DAILY_STAKE = 100;
 const STORE = {
   cash: 'stocktrends-v2-cash',
   positions: 'stocktrends-v2-positions',
   trades: 'stocktrends-v2-trades',
-  snapshots: 'stocktrends-v2-snapshots'
+  snapshots: 'stocktrends-v2-snapshots',\n  dailyJournal: 'stocktrends-v1-daily-r100-journal'
 };
 
 // These values are intentionally illustrative until Twelve Data is connected.
@@ -62,7 +62,7 @@ export default function App() {
   const [cash, setCash] = useState(() => readStore(STORE.cash, STARTING_CASH));
   const [positions, setPositions] = useState(() => readStore(STORE.positions, {}));
   const [trades, setTrades] = useState(() => readStore(STORE.trades, []));
-  const [snapshots, setSnapshots] = useState(() => readStore(STORE.snapshots, []));
+  const [snapshots, setSnapshots] = useState(() => readStore(STORE.snapshots, []));\n  const [dailyJournal, setDailyJournal] = useState(() => readStore(STORE.dailyJournal, []));
   const [activeTab, setActiveTab] = useState('Overview');
   const [notice, setNotice] = useState('');
   const [selected, setSelected] = useState(null);
@@ -71,7 +71,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem(STORE.cash, JSON.stringify(cash)); }, [cash]);
   useEffect(() => { localStorage.setItem(STORE.positions, JSON.stringify(positions)); }, [positions]);
   useEffect(() => { localStorage.setItem(STORE.trades, JSON.stringify(trades)); }, [trades]);
-  useEffect(() => { localStorage.setItem(STORE.snapshots, JSON.stringify(snapshots)); }, [snapshots]);
+  useEffect(() => { localStorage.setItem(STORE.snapshots, JSON.stringify(snapshots)); }, [snapshots]);\n  useEffect(() => { localStorage.setItem(STORE.dailyJournal, JSON.stringify(dailyJournal)); }, [dailyJournal]);
 
   // Lock the daily list once per New York calendar day. Existing records are never overwritten.
   useEffect(() => {
@@ -162,7 +162,7 @@ export default function App() {
   const nav = [
     { name: 'Overview', icon: LayoutDashboard }, { name: 'Watchlist', icon: Eye },
     { name: 'Paper trading', icon: Wallet }, { name: 'Performance', icon: BarChart3 },
-    { name: 'Prediction log', icon: History }
+    { name: 'Prediction log', icon: History }, { name: 'R100 journal', icon: BookOpen }
   ];
 
   return <div className="app-shell">
@@ -176,10 +176,10 @@ export default function App() {
     <main className="main-content" id="top">
       <header className="topbar"><div><div className="eyebrow">NASDAQ RESEARCH WORKSPACE</div><h1>{activeTab}</h1></div><div className="topbar-actions"><span className="demo-badge"><span /> SAMPLE DATA</span><button className="icon-button" title="About this prototype" onClick={() => setSelected({ name: 'About Stocktrends', reason: 'This prototype uses illustrative prices and transparent rule-based sample scores. It is not connected to live market data or an AI model yet. Nothing here is an investment recommendation.' })}><CircleHelp size={18} /></button></div></header>
 
-      <div className="notice-bar"><ShieldCheck size={17} /><span><strong>Paper trading only.</strong> Prices and features are illustrative. Daily selections are saved locally and are not live AI predictions.</span></div>
+      <div className="notice-bar"><ShieldCheck size={17} /><span><strong>Paper trading only.</strong> The R100 daily challenge splits R20 across five picks. Current outcomes use illustrative percentage changes until live data is connected.</span></div>
       {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notification"><X size={16} /></button></div>}
 
-      <section className="welcome-row"><div><div className="eyebrow">DAILY RESEARCH BRIEFING · {todayKey()}</div><h2>Five picks. <span>One scorecard.</span></h2><p>Ranked candidates, recorded decisions and a paper-trading ledger.</p></div><div className="welcome-actions"><button className="secondary-button" onClick={exportData}><ExternalLink size={15} /> Export data</button><button className="primary-button" onClick={createTodayPicks} disabled={Boolean(currentSnapshot)}><Target size={16} /> {currentSnapshot ? "Today’s 5 locked" : "Lock today’s 5"}</button></div></section>
+      <section className="welcome-row"><div><div className="eyebrow">DAILY RESEARCH BRIEFING · {todayKey()}</div><h2>Five picks. <span>R100 on the line.</span></h2><p>Simulate R20 on each daily pick, review the end-of-day result and keep a permanent local journal.</p></div><div className="welcome-actions"><button className="secondary-button" onClick={exportData}><ExternalLink size={15} /> Export data</button><button className="primary-button" onClick={closeDailySession} disabled={dailyJournal.some(entry => entry.id === todayKey())}><BookOpen size={16} /> {dailyJournal.some(entry => entry.id === todayKey()) ? 'Today saved' : 'Close day & journal'}</button></div></section>
 
       <section className="stats-grid">
         <StatCard label="Paper portfolio" value={money(portfolioValue)} detail={`Starting cash: ${money(STARTING_CASH)}`} icon={<Wallet size={18} />} />
@@ -200,7 +200,7 @@ export default function App() {
         <div className="panel-footer"><span><Sparkles size={15} /> Transparent demo formula; no live feed or AI model connected.</span><button className="text-button" onClick={() => setActiveTab('Prediction log')}>View prediction log →</button></div>
       </section>}
 
-      {(activeTab === 'Overview' || activeTab === 'Performance') && <section className="bottom-grid">
+      {activeTab === 'R100 journal' && <section className="panel"><div className="panel-heading"><div><div className="eyebrow">DAILY PAPER CHALLENGE</div><h3>R100 performance journal</h3></div><span className="count-pill">{dailyJournal.length} days</span></div><div className="journal-summary"><div><span>Total simulated P/L</span><strong className={dailyJournal.reduce((sum,e)=>sum+e.pnl,0) >= 0 ? 'positive-text' : 'negative-text'}>{dailyJournal.reduce((sum,e)=>sum+e.pnl,0) >= 0 ? '+' : '−'}R{Math.abs(dailyJournal.reduce((sum,e)=>sum+e.pnl,0)).toFixed(2)}</strong></div><div><span>Days recorded</span><strong>{dailyJournal.length}</strong></div><div><span>Stake per day</span><strong>R100.00</strong></div></div>{dailyJournal.length === 0 ? <div className="empty-state"><div className="empty-icon"><BookOpen size={22}/></div><strong>Your journal is ready</strong><p>At the end of a trading day, choose “Close day & journal” to save the five-stock result. Each pick receives R20 of the imaginary R100.</p></div> : <div className="snapshot-list">{[...dailyJournal].sort((a,b)=>b.id.localeCompare(a.id)).map(entry => <div className="snapshot-card" key={entry.id}><div className="snapshot-head"><div><strong>{entry.id} · Starting stake R{entry.stake.toFixed(2)}</strong><small>Saved {new Date(entry.closedAt).toLocaleString()} · {entry.method}</small></div><span className={`signal ${entry.pnl >= 0 ? 'signal-momentum' : 'signal-watch'}`}>{entry.pnl >= 0 ? 'PROFIT' : 'LOSS'} · {entry.pnl >= 0 ? '+' : '−'}R{Math.abs(entry.pnl).toFixed(2)}</span></div><div className="table-wrap"><table><thead><tr><th>STOCK</th><th>STAKE</th><th>DAILY MOVE</th><th>PROFIT / LOSS</th><th>ENDING VALUE</th></tr></thead><tbody>{entry.picks.map(pick=><tr key={pick.symbol}><td><strong>{pick.symbol}</strong><small className="journal-stock-name">{pick.name}</small></td><td>R{pick.stake.toFixed(2)}</td><td><span className={`change ${pick.changePct >= 0 ? 'up' : 'down'}`}>{signedPercent(pick.changePct)}</span></td><td className={pick.pnl >= 0 ? 'positive-text' : 'negative-text'}>{pick.pnl >= 0 ? '+' : '−'}R{Math.abs(pick.pnl).toFixed(2)}</td><td>R{pick.closingValue.toFixed(2)}</td></tr>)}</tbody></table></div><p className="snapshot-note">{entry.dataMode === 'illustrative' ? 'SAMPLE RESULT: based on illustrative changes, not actual market closing prices. Do not treat as a verified trading result.' : 'Market data recorded for this session.'}</p></div>)}</div>}<div className="panel-footer"><span><BookOpen size={14}/> Journal is saved in this browser; export data for a backup.</span><button className="text-button" onClick={exportData}>Export journal →</button></div></section>}\n\n      {(activeTab === 'Overview' || activeTab === 'Performance') && <section className="bottom-grid">
         <div className="panel performance-panel"><div className="panel-heading"><div><div className="eyebrow">PAPER ACCOUNT</div><h3>Portfolio breakdown</h3></div><BarChart3 size={19} className="muted-icon" /></div>
           <div className="portfolio-breakdown"><div><span>Available cash</span><strong>{money(cash)}</strong></div><div><span>Position market value</span><strong>{money(marketValue)}</strong></div><div><span>Unrealized P/L</span><strong className={unrealizedPnl >= 0 ? 'positive-text' : 'negative-text'}>{unrealizedPnl >= 0 ? '+' : '−'}{money(Math.abs(unrealizedPnl))}</strong></div><div><span>Closed trades</span><strong>{trades.filter(trade => trade.side === 'SELL').length}</strong></div></div>
           <div className="chart-placeholder compact"><Activity size={20} /><span>Verified equity curve will be added after historical market data is connected.</span></div>
