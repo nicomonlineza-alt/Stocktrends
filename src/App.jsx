@@ -149,14 +149,41 @@ export default function App() {
     setNotice(`Outcome saved for ${symbol}. Use this only when the forecast horizon has elapsed and a verified closing price is available.`);
   }
 
+  function closeDailySession() {
+    const key = todayKey();
+    if (dailyJournal.some(entry => entry.id === key)) {
+      setNotice("Today's R100 result is already saved and cannot be overwritten.");
+      return;
+    }
+    const snapshot = snapshots.find(item => item.id === key) || makeSnapshot();
+    const picks = snapshot.picks.map(pick => {
+      const stock = stocksBySymbol[pick.symbol] || pick;
+      const changePct = Number(pick.dailyChangePct ?? pick.referenceChange ?? stock.change ?? 0);
+      const stake = DAILY_STAKE / 5;
+      return {
+        symbol: pick.symbol, name: pick.name || stock.name, stake,
+        referencePrice: pick.referencePrice ?? stock.price, changePct,
+        pnl: stake * changePct / 100,
+        closingValue: stake * (1 + changePct / 100)
+      };
+    });
+    const pnl = picks.reduce((sum, pick) => sum + pick.pnl, 0);
+    setDailyJournal(previous => [...previous, {
+      id: key, closedAt: new Date().toISOString(), stake: DAILY_STAKE, picks, pnl,
+      endingValue: DAILY_STAKE + pnl, dataMode: snapshot.dataMode || 'illustrative',
+      method: snapshot.method || 'demo-weighted-v1'
+    }].sort((a, b) => a.id.localeCompare(b.id)));
+    setNotice(`Daily R100 paper session saved. Illustrative ${pnl >= 0 ? 'profit' : 'loss'}: R${Math.abs(pnl).toFixed(2)}. This uses sample changes, not verified closing prices.`);
+  }
+
   function exportData() {
-    const payload = { exportedAt: new Date().toISOString(), mode: 'paper-trading / illustrative-data', snapshots, trades, positions, cash };
+    const payload = { exportedAt: new Date().toISOString(), mode: 'paper-trading / illustrative-data', snapshots, dailyJournal, trades, positions, cash };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = `stocktrends-export-${todayKey()}.json`; anchor.click();
     URL.revokeObjectURL(url);
-    setNotice('Local prediction and paper-trade data exported as JSON.');
+    setNotice('Daily R100 journal, predictions and paper trades exported as JSON.');
   }
 
   const nav = [
