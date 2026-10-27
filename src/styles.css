@@ -40,3 +40,12 @@
  .snapshot-head{align-items:flex-start;flex-direction:column}
  .quantity-control{margin-left:auto}
 }
+
+
+/* Daily R100 paper-trading journal */
+.journal-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:18px 20px;border-bottom:1px solid var(--line)}
+.journal-summary>div{padding:14px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.025)}
+.journal-summary span{display:block;color:#8997aa;font-size:10px;margin-bottom:8px}
+.journal-summary strong{font:600 20px 'Space Grotesk',sans-serif}
+.journal-stock-name{display:block;color:#8290a5;font-size:9px;margin-top:4px}
+@media(max-width:720px){.journal-summary{padding:13px;gap:7px}.journal-summary>div{padding:10px}.journal-summary strong{font-size:15px}.journal-summary span{font-size:9px}}
