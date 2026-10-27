@@ -9,6 +9,8 @@ Stocktrends is an educational stock-research prototype focused on a five-stock d
 - Transparent weighted demo score: momentum (35%), relative strength (30%), volume (20%), and a volatility penalty (15%).
 - Five daily candidates are recorded once per New York calendar date in the browser's local storage; existing daily records are not overwritten by the daily-pick action.
 - Daily prediction log with reference price, score, directional bias, and manual outcome fields.
+- Daily R100 paper challenge: five locked picks receive R20 each; the end-of-day action records each pick's sample percentage move, rand profit/loss, ending value, and total daily result in a persistent browser journal.
+- R100 journal history with cumulative simulated profit/loss and JSON export including all daily journal entries. A date can only be journaled once.
 - Simulated cash, share positions, average cost, buy/sell ledger, and account reset.
 - Export of prediction records and paper-trading data as JSON.
 - Company research links.
@@ -16,9 +18,9 @@ Stocktrends is an educational stock-research prototype focused on a five-stock d
 
 ## Important limitations
 
-**The current dashboard still uses illustrative sample data and does not yet display live Twelve Data prices or a connected AI model.** The server-side endpoint scaffold is committed, but it needs a private `TWELVE_DATA_API_KEY` environment variable in the hosting environment and frontend integration before live data will appear. Prices, day changes, feature values, scores, and forecast bias currently shown in the dashboard are illustrative only. Manually marked outcomes are not a verified backtest. Do not use this prototype to make investment decisions.
+**The current dashboard still uses illustrative sample data and does not yet display live Twelve Data prices or a connected AI model. The daily R100 journal currently calculates from the illustrative percentage changes in the demo candidate list; it does not yet calculate genuine end-of-day results from verified market closes or make genuine AI-generated selections.** The server-side endpoint scaffold is committed, but it needs a private `TWELVE_DATA_API_KEY` environment variable in the hosting environment and frontend integration before live data will appear. Prices, day changes, feature values, scores, and forecast bias currently shown in the dashboard are illustrative only. Manually marked outcomes are not a verified backtest. Do not use this prototype to make investment decisions.
 
-The browser stores the paper account and prediction log locally on that device/browser. Data is not yet synced to a server, so clearing browser storage or switching devices will not carry it over.
+The browser stores the paper account, prediction log, and R100 daily journal locally on that device/browser. Data is not yet synced to a server, so clearing browser storage or switching devices will not carry it over.
 
 No brokerage connection or real-money trading is implemented. API credentials must never be placed in frontend code or committed to GitHub.
 
