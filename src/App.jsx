@@ -178,12 +178,12 @@ export default function App() {
     setPositions(previous => {
       const next = { ...previous };
       delete next[weakest.symbol];
-      if (buyQty > 0) next[replacement.symbol] = { shares: buyQty, averageCost: replacement.price };
+      if (buyQty > 0) next[replacement.symbol] = { shares: buyQty, averageCost: replacement.price, entryFeatures: replacement.signalFeatures || null, stopLoss: replacement.stopLoss || null, takeProfit: replacement.takeProfit || null, entryReason: `AI rotation from ${weakest.symbol}` };
       return next;
     });
     setTrades(previous => [
-      ...(buyQty > 0 ? [{ id: crypto.randomUUID?.() || `${Date.now()}-buy`, symbol: replacement.symbol, side: 'BUY', shares: buyQty, price: replacement.price, averageCostAtSale: replacement.price, realizedPnl: 0, time: now, reason: `AI rotation from ${weakest.symbol}` }] : []),
-      { id: crypto.randomUUID?.() || `${Date.now()}-sell`, symbol: weakest.symbol, side: 'SELL', shares: sellQty, price: salePrice, averageCostAtSale: weakest.position.averageCost, realizedPnl: salePnl, time: now, reason: `AI rotation → ${replacement.symbol}` },
+      ...(buyQty > 0 ? [{ id: crypto.randomUUID?.() || `${Date.now()}-buy`, symbol: replacement.symbol, side: 'BUY', shares: buyQty, price: replacement.price, averageCostAtSale: replacement.price, realizedPnl: 0, entryFeatures: replacement.signalFeatures || null, time: now, reason: `AI rotation from ${weakest.symbol}` }] : []),
+      { id: crypto.randomUUID?.() || `${Date.now()}-sell`, symbol: weakest.symbol, side: 'SELL', shares: sellQty, price: salePrice, averageCostAtSale: weakest.position.averageCost, realizedPnl: salePnl, entryFeatures: weakest.position.entryFeatures || null, time: now, reason: `AI rotation → ${replacement.symbol}` },
       ...previous
     ]);
     setNotice(buyQty > 0 ? `AI rotation: sold ${weakest.symbol} (${salePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(salePnl))}) and bought ${replacement.symbol}. Rule-based sample scoring only.` : `Sold ${weakest.symbol} (${salePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(salePnl))}), but available cash could not buy ${replacement.symbol}.`);
