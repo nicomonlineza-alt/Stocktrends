@@ -49,3 +49,7 @@
 .journal-summary strong{font:600 20px 'Space Grotesk',sans-serif}
 .journal-stock-name{display:block;color:#8290a5;font-size:9px;margin-top:4px}
 @media(max-width:720px){.journal-summary{padding:13px;gap:7px}.journal-summary>div{padding:10px}.journal-summary strong{font-size:15px}.journal-summary span{font-size:9px}}
+
+.position-limit-note{display:block;color:#7f8ca2;font-size:10px;margin-top:7px}
+.trade-history-panel{margin-top:18px}
+.trade-history-panel td{white-space:nowrap}
