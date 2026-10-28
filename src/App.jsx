@@ -7,6 +7,7 @@ import {
 
 const STARTING_CASH = 100000; // Existing optional paper-trading account; separate from the daily R100 challenge.
 const DAILY_STAKE = 100;
+const MAX_CONCURRENT_POSITIONS = 5;
 const STORE = {
   cash: 'stocktrends-v2-cash',
   positions: 'stocktrends-v2-positions',
@@ -95,7 +96,7 @@ export default function App() {
   const costBasis = openPositions.reduce((sum, [, position]) => sum + (position.averageCost || 0) * position.shares, 0);
   const portfolioValue = cash + marketValue;
   const unrealizedPnl = marketValue - costBasis;
-  const realizedPnl = trades.reduce((sum, trade) => sum + (trade.side === 'SELL' ? (trade.price - trade.averageCostAtSale) * trade.shares : 0), 0);
+  const realizedPnl = trades.reduce((sum, trade) => sum + (trade.side === 'SELL' ? (trade.realizedPnl ?? (trade.price - trade.averageCostAtSale) * trade.shares) : 0), 0);
   const totalPnl = portfolioValue - STARTING_CASH;
   const outcomes = snapshots.flatMap(snapshot => snapshot.picks).filter(pick => pick.outcome !== 'PENDING');
   const pendingOutcomes = snapshots.flatMap(snapshot => snapshot.picks).length - outcomes.length;
@@ -103,6 +104,11 @@ export default function App() {
 
   function buy(stock) {
     const shares = Math.max(1, Math.min(10000, Math.floor(Number(tradeSize) || 1)));
+    const alreadyHeld = Boolean(positions[stock.symbol]?.shares > 0);
+    if (!alreadyHeld && openPositions.length >= MAX_CONCURRENT_POSITIONS) {
+      setNotice(`Maximum ${MAX_CONCURRENT_POSITIONS} concurrent stocks reached. Use AI rotate to sell a holding and select a replacement.`);
+      return;
+    }
     const cost = stock.price * shares;
     if (cash < cost) { setNotice('Not enough simulated cash for that paper order.'); return; }
     const old = positions[stock.symbol] || { shares: 0, averageCost: 0 };
@@ -110,7 +116,7 @@ export default function App() {
     const averageCost = ((old.averageCost * old.shares) + cost) / newShares;
     setCash(previous => previous - cost);
     setPositions(previous => ({ ...previous, [stock.symbol]: { shares: newShares, averageCost } }));
-    setTrades(previous => [{ id: crypto.randomUUID?.() || String(Date.now()), symbol: stock.symbol, side: 'BUY', shares, price: stock.price, averageCostAtSale: averageCost, time: new Date().toISOString() }, ...previous]);
+    setTrades(previous => [{ id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, symbol: stock.symbol, side: 'BUY', shares, price: stock.price, averageCostAtSale: averageCost, realizedPnl: 0, time: new Date().toISOString() }, ...previous]);
     setNotice(`Paper buy recorded: ${shares} ${stock.symbol} share(s). No real order was placed.`);
   }
 
@@ -127,8 +133,47 @@ export default function App() {
       else next[stock.symbol] = { shares: remaining, averageCost: old.averageCost };
       return next;
     });
-    setTrades(previous => [{ id: crypto.randomUUID?.() || String(Date.now()), symbol: stock.symbol, side: 'SELL', shares, price: stock.price, averageCostAtSale, time: new Date().toISOString() }, ...previous]);
-    setNotice(`Paper sell recorded: ${shares} ${stock.symbol} share(s). No real order was placed.`);
+    const tradePnl = (stock.price - averageCostAtSale) * shares;
+    setTrades(previous => [{ id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, symbol: stock.symbol, side: 'SELL', shares, price: stock.price, averageCostAtSale, realizedPnl: tradePnl, time: new Date().toISOString() }, ...previous]);
+    setNotice(`Paper sell recorded: ${shares} ${stock.symbol} share(s) · ${tradePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(tradePnl))}. No real order was placed.`);
+  }
+
+  function autoRotate() {
+    const held = Object.keys(positions).filter(symbol => positions[symbol]?.shares > 0);
+    const available = ranked.filter(stock => !held.includes(stock.symbol));
+    if (!available.length) { setNotice('No unheld candidate is available to rotate into.'); return; }
+    const replacement = available[0];
+    if (held.length < MAX_CONCURRENT_POSITIONS) {
+      buy(replacement);
+      return;
+    }
+    const weakest = held.map(symbol => ({ symbol, stock: stocksBySymbol[symbol], position: positions[symbol] }))
+      .filter(item => item.stock)
+      .sort((a, b) => a.stock.score - b.stock.score || a.symbol.localeCompare(b.symbol))[0];
+    if (!weakest) { setNotice('Could not identify a held stock to replace.'); return; }
+    if (replacement.score <= weakest.stock.score) {
+      setNotice(`No rotation made: the best unheld candidate (${replacement.symbol}, score ${replacement.score}) does not outrank your weakest holding (${weakest.symbol}, score ${weakest.stock.score}).`);
+      return;
+    }
+    const sellQty = weakest.position.shares;
+    const salePrice = weakest.stock.price;
+    const salePnl = (salePrice - weakest.position.averageCost) * sellQty;
+    const now = new Date().toISOString();
+    const proceeds = salePrice * sellQty;
+    const buyQty = Math.min(sellQty, Math.floor((cash + proceeds) / replacement.price));
+    setCash(previous => previous + proceeds - (replacement.price * buyQty));
+    setPositions(previous => {
+      const next = { ...previous };
+      delete next[weakest.symbol];
+      if (buyQty > 0) next[replacement.symbol] = { shares: buyQty, averageCost: replacement.price };
+      return next;
+    });
+    setTrades(previous => [
+      ...(buyQty > 0 ? [{ id: crypto.randomUUID?.() || `${Date.now()}-buy`, symbol: replacement.symbol, side: 'BUY', shares: buyQty, price: replacement.price, averageCostAtSale: replacement.price, realizedPnl: 0, time: now, reason: `AI rotation from ${weakest.symbol}` }] : []),
+      { id: crypto.randomUUID?.() || `${Date.now()}-sell`, symbol: weakest.symbol, side: 'SELL', shares: sellQty, price: salePrice, averageCostAtSale: weakest.position.averageCost, realizedPnl: salePnl, time: now, reason: `AI rotation → ${replacement.symbol}` },
+      ...previous
+    ]);
+    setNotice(buyQty > 0 ? `AI rotation: sold ${weakest.symbol} (${salePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(salePnl))}) and bought ${replacement.symbol}. Rule-based sample scoring only.` : `Sold ${weakest.symbol} (${salePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(salePnl))}), but available cash could not buy ${replacement.symbol}.`);
   }
 
   function resetPaperAccount() {
@@ -207,7 +252,7 @@ export default function App() {
     <main className="main-content" id="top">
       <header className="topbar"><div><div className="eyebrow">NASDAQ RESEARCH WORKSPACE</div><h1>{activeTab}</h1></div><div className="topbar-actions"><span className="demo-badge"><span /> SAMPLE DATA</span><button className="icon-button" title="About this prototype" onClick={() => setSelected({ name: 'About Stocktrends', reason: 'This prototype uses illustrative prices and transparent rule-based sample scores. It is not connected to live market data or an AI model yet. Nothing here is an investment recommendation.' })}><CircleHelp size={18} /></button></div></header>
 
-      <div className="notice-bar"><ShieldCheck size={17} /><span><strong>Paper trading only.</strong> The R100 daily challenge splits R20 across five picks. Current outcomes use illustrative percentage changes until live data is connected.</span></div>
+      <div className="notice-bar"><ShieldCheck size={17} /><span><strong>Paper trading only.</strong> Maximum {MAX_CONCURRENT_POSITIONS} concurrent holdings. You can sell and replace a stock; each buy and sell records its own P/L. The daily R100 challenge is separate. Prices and ranking are illustrative, not live AI.</span></div>
       {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notification"><X size={16} /></button></div>}
 
       <section className="welcome-row"><div><div className="eyebrow">DAILY RESEARCH BRIEFING · {todayKey()}</div><h2>Five picks. <span>R100 on the line.</span></h2><p>Simulate R20 on each daily pick, review the end-of-day result and keep a permanent local journal.</p></div><div className="welcome-actions"><button className="secondary-button" onClick={exportData}><ExternalLink size={15} /> Export data</button><button className="primary-button" onClick={closeDailySession} disabled={dailyJournal.some(entry => entry.id === todayKey())}><BookOpen size={16} /> {dailyJournal.some(entry => entry.id === todayKey()) ? 'Today saved' : 'Close day & journal'}</button></div></section>
@@ -239,14 +284,14 @@ export default function App() {
           <div className="chart-placeholder compact"><Activity size={20} /><span>Verified equity curve will be added after historical market data is connected.</span></div>
         </div>
         <div className="panel activity-panel"><div className="panel-heading"><div><div className="eyebrow">LATEST ACTIVITY</div><h3>Paper trade ledger</h3></div><span className="count-pill">{trades.length}</span></div>
-          {trades.length === 0 ? <div className="empty-state"><div className="empty-icon"><Wallet size={22} /></div><strong>No paper trades yet</strong><p>Record a simulated buy or sell from the watchlist to start the ledger.</p></div> : <div className="trade-list">{trades.slice(0, 6).map(trade => <div className="trade-row" key={trade.id}><span className={`trade-icon ${trade.side.toLowerCase()}`}>{trade.side === 'BUY' ? <ArrowDownRight size={17} /> : <ArrowUpRight size={17} />}</span><div className="trade-description"><strong>{trade.side} {trade.symbol} · {trade.shares} share(s)</strong><small>{new Date(trade.time).toLocaleString()}</small></div><div className="trade-price"><strong>{money(trade.price * trade.shares)}</strong><small>{money(trade.price)} / share</small></div></div>)}</div>}
+          {trades.length === 0 ? <div className="empty-state"><div className="empty-icon"><Wallet size={22} /></div><strong>No paper trades yet</strong><p>Record a simulated buy or sell from the watchlist to start the ledger.</p></div> : <div className="trade-list">{trades.slice(0, 6).map(trade => <div className="trade-row" key={trade.id}><span className={`trade-icon ${trade.side.toLowerCase()}`}>{trade.side === 'BUY' ? <ArrowDownRight size={17} /> : <ArrowUpRight size={17} />}</span><div className="trade-description"><strong>{trade.side} {trade.symbol} · {trade.shares} share(s)</strong><small>{new Date(trade.time).toLocaleString()}</small></div><div className="trade-price"><strong>{money(trade.price * trade.shares)}</strong><small>{money(trade.price)} / share</small><small className={(trade.side === 'SELL' ? (trade.realizedPnl ?? ((trade.price - trade.averageCostAtSale) * trade.shares)) : ((stocksBySymbol[trade.symbol]?.price ?? trade.price) - trade.price) * trade.shares) >= 0 ? 'positive-text' : 'negative-text'}>{trade.side === 'SELL' ? `Realized ${((trade.realizedPnl ?? ((trade.price - trade.averageCostAtSale) * trade.shares)) >= 0 ? '+' : '−') + money(Math.abs(trade.realizedPnl ?? ((trade.price - trade.averageCostAtSale) * trade.shares)))}` : `Open P/L ${(((stocksBySymbol[trade.symbol]?.price ?? trade.price) - trade.price) * trade.shares) >= 0 ? '+' : '−'}${money(Math.abs(((stocksBySymbol[trade.symbol]?.price ?? trade.price) - trade.price) * trade.shares))}`}</small></div></div>)}</div>}
           <div className="panel-footer"><button className="text-button" onClick={() => setActiveTab('Paper trading')}>Open positions →</button><button className="reset-button" onClick={resetPaperAccount}>Reset paper account</button></div>
         </div>
       </section>}
 
-      {activeTab === 'Paper trading' && <section className="panel info-panel"><div className="panel-heading"><div><div className="eyebrow">SIMULATED PORTFOLIO</div><h3>Open positions</h3></div><label className="quantity-control">Shares <input type="number" min="1" max="10000" value={tradeSize} onChange={event => setTradeSize(event.target.value)} /></label></div>
-        {openPositions.length === 0 ? <div className="empty-state"><div className="empty-icon"><Wallet size={22} /></div><strong>No open positions</strong><p>Return to the watchlist and record a paper buy to track a simulated position.</p><button className="primary-button" onClick={() => setActiveTab('Overview')}>Browse watchlist</button></div> : <div className="table-wrap"><table><thead><tr><th>STOCK</th><th>SHARES</th><th>AVERAGE COST</th><th>SAMPLE MARK</th><th>MARKET VALUE</th><th>ACTION</th></tr></thead><tbody>{openPositions.map(([symbol, position]) => { const stock = stocksBySymbol[symbol]; if (!stock) return null; return <tr key={symbol}><td><strong>{symbol}</strong></td><td>{position.shares}</td><td>{money(position.averageCost)}</td><td>{money(stock.price)}</td><td>{money(stock.price * position.shares)}</td><td><button className="small-button sell" onClick={() => sell(stock)}>Sell quantity</button></td></tr>; })}</tbody></table></div>}
-        <div className="panel-footer"><span>Stored in this browser only. Prices are sample marks.</span><button className="text-button" onClick={resetPaperAccount}><RotateCcw size={13} /> Reset account</button></div>
+      {activeTab === 'Paper trading' && <section className="panel info-panel"><div className="panel-heading"><div><div className="eyebrow">SIMULATED PORTFOLIO</div><h3>Open positions <span className="count-pill">{openPositions.length}/{MAX_CONCURRENT_POSITIONS}</span></h3><small className="position-limit-note">Concurrent holding limit: {MAX_CONCURRENT_POSITIONS}</small></div><div className="welcome-actions"><button className="secondary-button" onClick={autoRotate}><Sparkles size={15} /> AI rotate / replace</button><label className="quantity-control">Shares <input type="number" min="1" max="10000" value={tradeSize} onChange={event => setTradeSize(event.target.value)} /></label></div>
+        {openPositions.length === 0 ? <div className="empty-state"><div className="empty-icon"><Wallet size={22} /></div><strong>No open positions</strong><p>Return to the watchlist and record a paper buy to track a simulated position.</p><button className="primary-button" onClick={() => setActiveTab('Overview')}>Browse watchlist</button></div> : <div className="table-wrap"><table><thead><tr><th>STOCK</th><th>SHARES</th><th>AVERAGE COST</th><th>SAMPLE MARK</th><th>MARKET VALUE</th><th>UNREALIZED P/L</th><th>ACTION</th></tr></thead><tbody>{openPositions.map(([symbol, position]) => { const stock = stocksBySymbol[symbol]; if (!stock) return null; const positionPnl = (stock.price - position.averageCost) * position.shares; return <tr key={symbol}><td><strong>{symbol}</strong></td><td>{position.shares}</td><td>{money(position.averageCost)}</td><td>{money(stock.price)}</td><td>{money(stock.price * position.shares)}</td><td className={positionPnl >= 0 ? 'positive-text' : 'negative-text'}>{positionPnl >= 0 ? '+' : '−'}{money(Math.abs(positionPnl))}</td><td><button className="small-button sell" onClick={() => sell(stock)}>Sell quantity</button></td></tr>; })}</tbody></table></div>}
+        <div className="panel-footer"><span>{openPositions.length}/{MAX_CONCURRENT_POSITIONS} concurrent holdings · Stored in this browser only. Prices are sample marks.</span><button className="text-button" onClick={resetPaperAccount}><RotateCcw size={13} /> Reset account</button></div>
       </section>}
 
       {activeTab === 'Paper trading' && <section className="panel trade-history-panel"><div className="panel-heading"><div><div className="eyebrow">FULL TRANSACTION HISTORY</div><h3>Buy & sell P/L ledger</h3></div><span className="count-pill">{trades.length} trades</span></div>
