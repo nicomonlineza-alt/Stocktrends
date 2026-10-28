@@ -6,7 +6,9 @@ Stocktrends is an educational stock-research prototype focused on a five-stock d
 
 - Responsive dark/glass dashboard for desktop and mobile.
 - Ten illustrative NASDAQ-listed candidate examples.
-- Transparent weighted demo score: momentum (35%), relative strength (30%), volume (20%), and a volatility penalty (15%).
+- On-demand Twelve Data market scan for the 10-stock candidate universe, with verified candle timestamps and a clear sample-data fallback.
+- Technical analysis of EMA 9/21, RSI(14), MACD, ATR, 20-candle momentum and relative volume; transparent BUY / HOLD / SELL signals and ATR-based stop/target levels.
+- Adaptive indicator weights that begin adjusting after five closed paper trades, using logged entry features and realised outcomes.
 - Five daily candidates are recorded once per New York calendar date in the browser's local storage; existing daily records are not overwritten by the daily-pick action.
 - Daily prediction log with reference price, score, directional bias, and manual outcome fields.
 - Daily R100 paper challenge: five locked picks receive R20 each; the end-of-day action records each pick's sample percentage move, rand profit/loss, ending value, and total daily result in a persistent browser journal.
@@ -39,11 +41,9 @@ The `.env.example` file documents the required variable name only; it does not c
 ## Next milestones
 
 1. Verify production build and endpoint behaviour.
-2. Configure the private Twelve Data key in the hosting environment and connect the frontend to the server-side endpoint.
-3. Replace sample values only with timestamped, verified market data and visible stale/error states.
-4. Analyse the latest 21 completed candles and explain the factors behind each candidate score.
-5. Lock daily selections with reference quotes, forecast horizon, strategy version, and data provenance.
-6. Automatically evaluate outcomes against verified future prices; add fees, drawdown, benchmark comparisons, and out-of-sample testing.
-7. Deploy only after the GitHub prototype is stable.
+2. Verify that the private Twelve Data key is configured in the Vercel production environment and test the live scan end-to-end.
+3. Add a durable server-side database so paper positions and learning history persist across devices.
+4. Automatically evaluate frozen daily picks against verified future prices; add spread/fees, slippage, drawdown, benchmark comparisons, and out-of-sample testing.
+5. Add a scheduled scan service only after the rules have been validated; browser-triggered scans do not run when the app is closed.
 
 See [PROJECT_PLAN.md](./PROJECT_PLAN.md), [STRATEGY.md](./STRATEGY.md), and [docs/progress-log.md](./docs/progress-log.md).
