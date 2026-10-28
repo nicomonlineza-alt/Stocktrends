@@ -1,43 +1,31 @@
-# Selection Strategy — Prototype v0.2
+# Selection Strategy — Technical Indicators + Paper Learning
 
-## Current status
+## Live analysis
 
-The app uses illustrative sample values only. It is not connected to Twelve Data, live quotes, or an AI model. The current score is a transparent demo formula to test the ranking and recording workflow; it is not a validated trading strategy.
+Stocktrends requests 60 daily candles per candidate through the server-side Twelve Data endpoint. The private key must be configured as `TWELVE_DATA_API_KEY` in the Vercel environment. If the key is missing, the provider is rate-limited, or candles are invalid, the app reports the issue and preserves its last saved history rather than pretending sample data is live.
 
-## Current demonstration formula
+The indicator engine calculates:
+- **EMA 9 and EMA 21:** short/medium trend alignment.
+- **RSI(14):** momentum condition; avoids treating very overbought readings as fresh entries.
+- **MACD (12, 26, 9):** momentum direction and histogram change.
+- **ATR(14):** volatility-aware stop and target reference.
+- **20-candle momentum:** recent trend strength.
+- **Relative volume:** latest volume compared with prior candles, when provider volume is available.
 
-Each candidate has illustrative feature values on a 0–100 scale:
+The score blends trend (30%), momentum (22%), MACD (20%), RSI condition (16%) and relative volume (12%). Once there are at least five closed paper trades with stored entry features, weights adapt modestly using the observed relationship between each entry feature and the trade outcome. This small online adjustment is exploratory and may overfit; it is not a validated machine-learning model.
 
-- Momentum: 35%
-- Relative strength: 30%
-- Volume activity: 20%
-- Volatility penalty: 15%, calculated as (100 − volatility)
+## Entry and exit rules
 
-`demo_score = round(momentum × 0.35 + relative_strength × 0.30 + volume × 0.20 + (100 − volatility) × 0.15)`
+A **BUY setup** requires price above EMA21, EMA9 above EMA21, RSI between 45 and 68, and a positive MACD histogram. A **SELL / EXIT** signal is generated when price is below EMA21 or RSI is below 38 while MACD is negative. Otherwise the signal is **WAIT**. The initial stop reference is 1.5 ATR below the observed price and the target reference is 2 ATR above it.
 
-The app sorts candidates by score, with ticker symbol as a deterministic tie-breaker, and records the top five. Directional bias is currently based on the illustrative daily percentage change. Neither the feature values nor the resulting direction are live or predictive.
+These are testable rules, not an optimal or guaranteed point. Gaps, spreads, delayed candles, incomplete sessions and price slippage can change outcomes. The daily-candle analysis is a slower swing-style signal, not a tick-level day-trading system.
 
-## Daily prediction record
+## Paper trading and learning
 
-For each daily selection, the prototype saves:
-- New York calendar date and creation timestamp.
-- Symbol, rank, and demo score.
-- Illustrative reference price and daily change.
-- Directional bias, brief rationale, and strategy version.
-- A pending outcome field that can be manually marked for interface testing.
+When the user presses **Scan market & paper trade**, the app scans the candidate list sequentially, records the latest candle timestamp, exits existing paper positions when an exit rule fires, and opens one-share simulated positions on qualifying BUY setups up to five concurrent holdings. Each simulated transaction stores its reason and available entry features. Closed-trade results feed the modest adaptive weighting described above.
 
-The app preserves prior dates in local browser storage. It does not replace an existing record for the same date. Since data is browser-local, it is not yet durable across devices or browser-storage deletion.
+The scan is not a background process: it runs only while the app is open and the user triggers it. No brokerage is connected and no real orders are placed. Browser storage is local to that browser; it is not a durable multi-device journal.
 
-## Required live-data milestone
+## Evaluation needed before trusting the strategy
 
-Before the scores can be used for real evaluation:
-1. Fetch quotes and historical candles from Twelve Data through a secure server-side endpoint.
-2. Record provider timestamps, market session, symbol, feature values, and stale/error states.
-3. Calculate features only from data that was available at prediction time.
-4. Freeze daily selections and store them durably outside the browser.
-5. Resolve predictions automatically only after the documented forecast horizon, using verified future prices.
-6. Evaluate on unseen periods, including transaction costs, drawdown, benchmark performance, sample size, and multiple market regimes.
-
-## Safety boundary
-
-This is an educational research and paper-trading project. No strategy can guarantee profit. Prediction accuracy and simulated trading returns must be measured separately. No real brokerage orders are part of this project.
+Freeze picks before the forecast period, then evaluate on unseen periods with execution assumptions fixed in advance. Track win rate, average win/loss, expectancy, maximum drawdown, turnover, benchmark return, and prediction accuracy by forecast horizon. Include transaction costs and compare against a simple buy-and-hold baseline. Do not tune the strategy solely on the same trades used to judge it.
