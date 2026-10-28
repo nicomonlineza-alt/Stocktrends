@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { analyzeCandles, learnIndicatorWeights, exitReason } from './strategy.js';
 import {
   Activity, ArrowDownRight, ArrowUpRight, BarChart3, BrainCircuit, CircleHelp,
   ExternalLink, Eye, LayoutDashboard, ShieldCheck, Sparkles,
@@ -38,21 +39,22 @@ const readStore = (key, fallback) => {
   try { const value = localStorage.getItem(key); return value ? JSON.parse(value) : fallback; }
   catch { return fallback; }
 };
-const rankCandidates = () => CANDIDATES.map(stock => ({
+const rankCandidates = (source = CANDIDATES) => source.map(stock => ({
   ...stock,
-  score: Math.round(stock.momentum * 0.35 + stock.relativeStrength * 0.30 + stock.volume * 0.20 + (100 - stock.volatility) * 0.15),
+  score: Number.isFinite(stock.score) ? stock.score : Math.round(stock.momentum * 0.35 + stock.relativeStrength * 0.30 + stock.volume * 0.20 + (100 - stock.volatility) * 0.15),
 })).sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
-const makeSnapshot = () => {
-  const ranked = rankCandidates().slice(0, 5);
+const makeSnapshot = (source = rankCandidates(), dataMode = 'illustrative') => {
+  const ranked = rankCandidates(source).slice(0, 5);
   return {
     id: todayKey(),
     createdAt: new Date().toISOString(),
-    dataMode: 'illustrative',
-    method: 'demo-weighted-v1',
+    dataMode,
+    method: dataMode === 'live' ? 'technical-indicators-adaptive-v1' : 'demo-weighted-v1',
     picks: ranked.map((stock, index) => ({
       symbol: stock.symbol, name: stock.name, rank: index + 1, score: stock.score,
       referencePrice: stock.price, referenceChange: stock.change, direction: stock.change >= 0 ? 'UP' : 'DOWN',
-      stake: DAILY_STAKE / 5, dailyChangePct: stock.change, reason: stock.reason, outcome: 'PENDING'
+      stake: DAILY_STAKE / 5, dailyChangePct: stock.change, reason: stock.reason, outcome: 'PENDING',
+      indicators: stock.indicators || null, stopLoss: stock.stopLoss || null, takeProfit: stock.takeProfit || null, signalFeatures: stock.signalFeatures || null
     }))
   };
 };
@@ -67,6 +69,11 @@ export default function App() {
   const [trades, setTrades] = useState(() => readStore(STORE.trades, []));
   const [snapshots, setSnapshots] = useState(() => readStore(STORE.snapshots, []));
   const [dailyJournal, setDailyJournal] = useState(() => readStore(STORE.dailyJournal, []));
+  const [liveStocks, setLiveStocks] = useState(() => readStore('stocktrends-live-stocks-v1', []));
+  const [lastScanAt, setLastScanAt] = useState(() => readStore('stocktrends-last-scan-v1', null));
+  const [marketStatus, setMarketStatus] = useState(() => readStore('stocktrends-market-status-v1', 'No verified market scan yet'));
+  const [scanning, setScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState({ done: 0, total: CANDIDATES.length });
   const [activeTab, setActiveTab] = useState('Overview');
   const [notice, setNotice] = useState('');
   const [selected, setSelected] = useState(null);
@@ -77,19 +84,25 @@ export default function App() {
   useEffect(() => { localStorage.setItem(STORE.trades, JSON.stringify(trades)); }, [trades]);
   useEffect(() => { localStorage.setItem(STORE.snapshots, JSON.stringify(snapshots)); }, [snapshots]);
   useEffect(() => { localStorage.setItem(STORE.dailyJournal, JSON.stringify(dailyJournal)); }, [dailyJournal]);
+  useEffect(() => { localStorage.setItem('stocktrends-live-stocks-v1', JSON.stringify(liveStocks)); }, [liveStocks]);
+  useEffect(() => { localStorage.setItem('stocktrends-last-scan-v1', JSON.stringify(lastScanAt)); }, [lastScanAt]);
+  useEffect(() => { localStorage.setItem('stocktrends-market-status-v1', JSON.stringify(marketStatus)); }, [marketStatus]);
 
-  // Lock the daily list once per New York calendar day. Existing records are never overwritten.
+  // Lock the daily picks only after a verified market scan is available; never overwrite a saved day.
   useEffect(() => {
     const key = todayKey();
+    if (!liveStocks.length || snapshots.some(snapshot => snapshot.id === key)) return;
     setSnapshots(previous => previous.some(snapshot => snapshot.id === key)
       ? previous
-      : [...previous, makeSnapshot()].sort((a, b) => a.id.localeCompare(b.id)));
-    // The updater also guards against React StrictMode re-running mount effects.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      : [...previous, makeSnapshot(liveStocks, 'live')].sort((a, b) => a.id.localeCompare(b.id)));
+  }, [liveStocks, snapshots]);
 
   const currentSnapshot = snapshots.find(snapshot => snapshot.id === todayKey()) || null;
-  const ranked = useMemo(() => rankCandidates(), []);
+  const ranked = useMemo(() => rankCandidates(liveStocks.length ? liveStocks : CANDIDATES), [liveStocks]);
+  const displayedPicks = liveStocks.length
+    ? ranked.slice(0, 5).map((stock, index) => ({ ...stock, rank: index + 1, referencePrice: stock.price, referenceChange: stock.change, direction: stock.direction, reason: stock.reason }))
+    : (currentSnapshot?.picks || ranked.slice(0, 5).map((stock, index) => ({ ...stock, rank: index + 1 })));
+  const learnedWeights = useMemo(() => learnIndicatorWeights(trades), [trades]);
   const stocksBySymbol = useMemo(() => Object.fromEntries(ranked.map(stock => [stock.symbol, stock])), [ranked]);
   const openPositions = Object.entries(positions).filter(([, position]) => position.shares > 0);
   const marketValue = openPositions.reduce((sum, [symbol, position]) => sum + (stocksBySymbol[symbol]?.price || position.averageCost || 0) * position.shares, 0);
@@ -115,8 +128,8 @@ export default function App() {
     const newShares = old.shares + shares;
     const averageCost = ((old.averageCost * old.shares) + cost) / newShares;
     setCash(previous => previous - cost);
-    setPositions(previous => ({ ...previous, [stock.symbol]: { shares: newShares, averageCost } }));
-    setTrades(previous => [{ id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, symbol: stock.symbol, side: 'BUY', shares, price: stock.price, averageCostAtSale: averageCost, realizedPnl: 0, time: new Date().toISOString() }, ...previous]);
+    setPositions(previous => ({ ...previous, [stock.symbol]: { shares: newShares, averageCost, entryFeatures: old.entryFeatures || stock.signalFeatures || null, stopLoss: stock.stopLoss || old.stopLoss || null, takeProfit: stock.takeProfit || old.takeProfit || null, entryReason: old.entryReason || stock.reason || null } }));
+    setTrades(previous => [{ id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, symbol: stock.symbol, side: 'BUY', shares, price: stock.price, averageCostAtSale: averageCost, realizedPnl: 0, entryFeatures: stock.signalFeatures || null, reason: stock.reason || 'Manual paper buy', time: new Date().toISOString() }, ...previous]);
     setNotice(`Paper buy recorded: ${shares} ${stock.symbol} share(s). No real order was placed.`);
   }
 
@@ -134,7 +147,7 @@ export default function App() {
       return next;
     });
     const tradePnl = (stock.price - averageCostAtSale) * shares;
-    setTrades(previous => [{ id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, symbol: stock.symbol, side: 'SELL', shares, price: stock.price, averageCostAtSale, realizedPnl: tradePnl, time: new Date().toISOString() }, ...previous]);
+    setTrades(previous => [{ id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, symbol: stock.symbol, side: 'SELL', shares, price: stock.price, averageCostAtSale, realizedPnl: tradePnl, entryFeatures: old.entryFeatures || null, reason: stock.reason || 'Manual paper sell', time: new Date().toISOString() }, ...previous]);
     setNotice(`Paper sell recorded: ${shares} ${stock.symbol} share(s) · ${tradePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(tradePnl))}. No real order was placed.`);
   }
 
@@ -176,6 +189,82 @@ export default function App() {
     setNotice(buyQty > 0 ? `AI rotation: sold ${weakest.symbol} (${salePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(salePnl))}) and bought ${replacement.symbol}. Rule-based sample scoring only.` : `Sold ${weakest.symbol} (${salePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(salePnl))}), but available cash could not buy ${replacement.symbol}.`);
   }
 
+  async function scanMarket() {
+    if (scanning) return;
+    setScanning(true);
+    setScanProgress({ done: 0, total: CANDIDATES.length });
+    setMarketStatus('Connecting to Twelve Data…');
+    const weights = learnIndicatorWeights(trades);
+    const found = [];
+    let failure = '';
+    try {
+      for (let i = 0; i < CANDIDATES.length; i++) {
+        if (i > 0) await new Promise(resolve => setTimeout(resolve, 8000));
+        const candidate = CANDIDATES[i];
+        setMarketStatus(`Analysing ${candidate.symbol} (${i + 1}/${CANDIDATES.length})…`);
+        try {
+          const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(candidate.symbol)}&interval=1day&outputsize=60`);
+          const payload = await response.json();
+          if (!response.ok) {
+            failure = payload.error || `Market data request failed (${response.status}).`;
+            if (response.status === 503 || response.status === 429) break;
+            setScanProgress({ done: i + 1, total: CANDIDATES.length });
+            continue;
+          }
+          const analysis = analyzeCandles(payload.candles, weights);
+          found.push({ ...candidate, ...analysis, dataMode: 'live', currency: payload.currency || 'USD', exchange: payload.exchange, source: payload.source, fetchedAt: payload.fetchedAt });
+        } catch (error) {
+          failure = error?.message || 'Market scan failed.';
+        }
+        setScanProgress({ done: i + 1, total: CANDIDATES.length });
+      }
+      if (!found.length) {
+        setMarketStatus(failure || 'No valid live candles returned.');
+        setNotice(`${failure || 'No live market data returned.'} Previous paper history has been preserved. Check that TWELVE_DATA_API_KEY is configured in Vercel.`);
+        return;
+      }
+      const sorted = rankCandidates(found);
+      setLiveStocks(sorted);
+      const scannedAt = new Date().toISOString();
+      setLastScanAt(scannedAt);
+      const status = `Twelve Data · ${found.length}/${CANDIDATES.length} stocks · updated ${new Date(scannedAt).toLocaleTimeString()}`;
+      setMarketStatus(status);
+
+      // Automatic paper execution only: close positions on an exit rule, then open the strongest BUY setups.
+      // This runs when the user triggers a scan; it does not run in the background when the app is closed.
+      const nextPositions = { ...positions };
+      let nextCash = cash;
+      const nextTrades = [...trades];
+      const actions = [];
+      for (const stock of sorted) {
+        const position = nextPositions[stock.symbol];
+        if (!position?.shares) continue;
+        const reason = exitReason(stock, position) || (stock.action === 'SELL' ? 'indicator exit signal' : null);
+        if (!reason) continue;
+        const shares = position.shares;
+        const realizedPnl = (stock.price - position.averageCost) * shares;
+        nextCash += stock.price * shares;
+        nextTrades.unshift({ id: crypto.randomUUID?.() || `${Date.now()}-${stock.symbol}-sell`, symbol: stock.symbol, side: 'SELL', shares, price: stock.price, averageCostAtSale: position.averageCost, realizedPnl, entryFeatures: position.entryFeatures || null, reason, time: scannedAt });
+        delete nextPositions[stock.symbol];
+        actions.push(`sold ${stock.symbol} (${realizedPnl >= 0 ? '+' : '−'}${money(Math.abs(realizedPnl))})`);
+      }
+      for (const stock of sorted) {
+        if (stock.action !== 'BUY' || nextPositions[stock.symbol]?.shares || Object.values(nextPositions).filter(p => p?.shares > 0).length >= MAX_CONCURRENT_POSITIONS) continue;
+        if (stock.price > nextCash) continue;
+        nextCash -= stock.price;
+        nextPositions[stock.symbol] = { shares: 1, averageCost: stock.price, entryFeatures: stock.signalFeatures, stopLoss: stock.stopLoss, takeProfit: stock.takeProfit, entryReason: stock.reason, entryTime: scannedAt };
+        nextTrades.unshift({ id: crypto.randomUUID?.() || `${Date.now()}-${stock.symbol}-buy`, symbol: stock.symbol, side: 'BUY', shares: 1, price: stock.price, averageCostAtSale: stock.price, realizedPnl: 0, entryFeatures: stock.signalFeatures, reason: `Automatic paper entry: ${stock.reason}`, time: scannedAt });
+        actions.push(`bought ${stock.symbol} (1 share)`);
+      }
+      setPositions(nextPositions);
+      setCash(nextCash);
+      setTrades(nextTrades);
+      setNotice(`Market scan complete. ${found.length} stocks analysed using EMA, RSI, MACD, ATR and volume. ${actions.length ? `Paper trades: ${actions.join('; ')}.` : 'No entry/exit met the rules; positions held.'} ${weights.learned ? `Indicator weights adapt from ${weights.sampleSize} closed trades.` : `Adaptive learning starts after 5 closed trades (${weights.sampleSize}/5 so far).`}`);
+    } finally {
+      setScanning(false);
+    }
+  }
+
   function resetPaperAccount() {
     if (!window.confirm('Reset simulated cash, positions and trade history? Daily prediction records will be preserved.')) return;
     setCash(STARTING_CASH); setPositions({}); setTrades([]);
@@ -187,7 +276,7 @@ export default function App() {
       setNotice("Today's five picks are already locked. Previous picks cannot be replaced after the fact.");
       return;
     }
-    setSnapshots(previous => [...previous, makeSnapshot()].sort((a, b) => a.id.localeCompare(b.id)));
+    setSnapshots(previous => [...previous, makeSnapshot(liveStocks.length ? liveStocks : rankCandidates(), liveStocks.length ? 'live' : 'illustrative')].sort((a, b) => a.id.localeCompare(b.id)));
     setNotice("Today's five picks have been locked in the local prediction log.");
   }
 
@@ -207,7 +296,10 @@ export default function App() {
     const snapshot = snapshots.find(item => item.id === key) || makeSnapshot();
     const picks = snapshot.picks.map(pick => {
       const stock = stocksBySymbol[pick.symbol] || pick;
-      const changePct = Number(pick.dailyChangePct ?? pick.referenceChange ?? stock.change ?? 0);
+      const reference = Number(pick.referencePrice || stock.price || 0);
+      const changePct = snapshot.dataMode === 'live' && reference > 0 && Number.isFinite(stock.price)
+        ? ((stock.price - reference) / reference) * 100
+        : Number(pick.dailyChangePct ?? pick.referenceChange ?? stock.change ?? 0);
       const stake = DAILY_STAKE / 5;
       return {
         symbol: pick.symbol, name: pick.name || stock.name, stake,
@@ -226,7 +318,7 @@ export default function App() {
   }
 
   function exportData() {
-    const payload = { exportedAt: new Date().toISOString(), mode: 'paper-trading / illustrative-data', snapshots, dailyJournal, trades, positions, cash };
+    const payload = { exportedAt: new Date().toISOString(), mode: liveStocks.length ? 'paper-trading / Twelve Data + technical indicators' : 'paper-trading / illustrative-data', snapshots, dailyJournal, trades, positions, cash, liveStocks, lastScanAt, learnedWeights };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -250,12 +342,12 @@ export default function App() {
     </aside>
 
     <main className="main-content" id="top">
-      <header className="topbar"><div><div className="eyebrow">NASDAQ RESEARCH WORKSPACE</div><h1>{activeTab}</h1></div><div className="topbar-actions"><span className="demo-badge"><span /> SAMPLE DATA</span><button className="icon-button" title="About this prototype" onClick={() => setSelected({ name: 'About Stocktrends', reason: 'This prototype uses illustrative prices and transparent rule-based sample scores. It is not connected to live market data or an AI model yet. Nothing here is an investment recommendation.' })}><CircleHelp size={18} /></button></div></header>
+      <header className="topbar"><div><div className="eyebrow">NASDAQ RESEARCH WORKSPACE</div><h1>{activeTab}</h1></div><div className="topbar-actions"><span className="demo-badge"><span /> {liveStocks.length ? 'LIVE INDICATORS' : 'SAMPLE DATA'}</span><button className="icon-button" title="About this prototype" onClick={() => setSelected({ name: 'About Stocktrends', reason: 'This prototype uses illustrative prices and transparent rule-based sample scores. It is not connected to live market data or an AI model yet. Nothing here is an investment recommendation.' })}><CircleHelp size={18} /></button></div></header>
 
-      <div className="notice-bar"><ShieldCheck size={17} /><span><strong>Paper trading only.</strong> Maximum {MAX_CONCURRENT_POSITIONS} concurrent holdings. You can sell and replace a stock; each buy and sell records its own P/L. The daily R100 challenge is separate. Prices and ranking are illustrative, not live AI.</span></div>
+      <div className="notice-bar"><ShieldCheck size={17} /><span><strong>Paper trading only.</strong> Maximum {MAX_CONCURRENT_POSITIONS} concurrent holdings. A scan checks EMA 9/21, RSI, MACD, ATR and volume, then records simulated exits/entries. Scans run only when triggered while this app is open; there is no background trading. If Twelve Data is not configured, sample values remain clearly labelled.</span></div>
       {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notification"><X size={16} /></button></div>}
 
-      <section className="welcome-row"><div><div className="eyebrow">DAILY RESEARCH BRIEFING · {todayKey()}</div><h2>Five picks. <span>R100 on the line.</span></h2><p>Simulate R20 on each daily pick, review the end-of-day result and keep a permanent local journal.</p></div><div className="welcome-actions"><button className="secondary-button" onClick={exportData}><ExternalLink size={15} /> Export data</button><button className="primary-button" onClick={closeDailySession} disabled={dailyJournal.some(entry => entry.id === todayKey())}><BookOpen size={16} /> {dailyJournal.some(entry => entry.id === todayKey()) ? 'Today saved' : 'Close day & journal'}</button></div></section>
+      <section className="welcome-row"><div><div className="eyebrow">DAILY RESEARCH BRIEFING · {todayKey()}</div><h2>Five picks. <span>R100 on the line.</span></h2><p>Scan the market, compare indicator patterns, and let the paper trader test rule-based entries and exits. No real orders are placed.</p><div className="eyebrow market-status-line">{marketStatus}{scanning ? ` · ${scanProgress.done}/${scanProgress.total}` : ''}</div>{learnedWeights.learned && <small className="subtle-label">Adaptive weights trained on {learnedWeights.sampleSize} closed paper trades</small>}</div><div className="welcome-actions"><button className="primary-button" onClick={scanMarket} disabled={scanning}><Activity size={15} /> {scanning ? `Scanning ${scanProgress.done}/${scanProgress.total}` : 'Scan market & paper trade'}</button><button className="secondary-button" onClick={exportData}><ExternalLink size={15} /> Export data</button><button className="secondary-button" onClick={closeDailySession} disabled={dailyJournal.some(entry => entry.id === todayKey())}><BookOpen size={16} /> {dailyJournal.some(entry => entry.id === todayKey()) ? 'Today saved' : 'Close day & journal'}</button></div></section>
 
       <section className="stats-grid">
         <StatCard label="Paper portfolio" value={money(portfolioValue)} detail={`Starting cash: ${money(STARTING_CASH)}`} icon={<Wallet size={18} />} />
@@ -265,15 +357,15 @@ export default function App() {
       </section>
 
       {(activeTab === 'Overview' || activeTab === 'Watchlist') && <section className="panel">
-        <div className="panel-heading"><div><div className="eyebrow">RANKED CANDIDATES</div><h3>Today's five to watch <span className="count-pill">05</span></h3></div><span className="subtle-label">Rule-based demo score · highest first</span></div>
-        <div className="table-wrap"><table><thead><tr><th>STOCK</th><th>SAMPLE PRICE</th><th>DAY CHANGE</th><th>DEMO SCORE</th><th>BIAS</th><th>ACTION</th></tr></thead><tbody>
-          {(currentSnapshot?.picks || ranked.slice(0, 5).map((stock, index) => ({ ...stock, rank: index + 1 }))).map((pick, index) => {
+        <div className="panel-heading"><div><div className="eyebrow">RANKED CANDIDATES</div><h3>Today's five to watch <span className="count-pill">05</span></h3></div><span className="subtle-label">{liveStocks.length ? 'Indicator score · live candles' : 'Demo score · sample values'}</span></div>
+        <div className="table-wrap"><table><thead><tr><th>STOCK</th><th>{liveStocks.length ? 'LATEST PRICE' : 'SAMPLE PRICE'}</th><th>DAY CHANGE</th><th>{liveStocks.length ? 'INDICATOR SCORE' : 'DEMO SCORE'}</th><th>SIGNAL</th><th>ACTION</th></tr></thead><tbody>
+          {displayedPicks.map((pick, index) => {
             const stock = stocksBySymbol[pick.symbol] || pick;
             const change = pick.referenceChange ?? stock.change;
             return <tr key={pick.symbol}><td><div className="stock-cell"><span className="stock-rank">{String(index + 1).padStart(2, '0')}</span><div><strong>{pick.symbol}</strong><small>{pick.name || stock.name}</small></div></div></td><td className="price-cell">{money(pick.referencePrice ?? stock.price)}</td><td><span className={`change ${change >= 0 ? 'up' : 'down'}`}>{change >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}{signedPercent(change)}</span></td><td><div className="score-cell"><div className="score-track"><span style={{ width: `${pick.score}%` }} /></div><strong>{pick.score}</strong></div></td><td><span className={`signal ${(pick.direction || (change >= 0 ? 'UP' : 'DOWN')) === 'UP' ? 'signal-momentum' : 'signal-watch'}`}>{pick.direction || (change >= 0 ? 'UP bias' : 'DOWN bias')}</span></td><td><div className="row-actions"><button className="small-button buy" onClick={() => buy(stock)}>Buy</button><button className="small-button sell" onClick={() => sell(stock)}>Sell</button><button className="link-button" title={`Details for ${stock.symbol}`} onClick={() => setSelected({ ...stock, score: pick.score, direction: pick.direction || (change >= 0 ? 'UP' : 'DOWN'), reason: pick.reason || stock.reason, referencePrice: pick.referencePrice || stock.price })}><ExternalLink size={15} /></button></div></td></tr>;
           })}
         </tbody></table></div>
-        <div className="panel-footer"><span><Sparkles size={15} /> Transparent demo formula; no live feed or AI model connected.</span><button className="text-button" onClick={() => setActiveTab('Prediction log')}>View prediction log →</button></div>
+        <div className="panel-footer"><span><Sparkles size={15} /> {liveStocks.length ? `Twelve Data candles · ${liveStocks[0]?.candleCount || 0} candles · latest candle ${liveStocks[0]?.candleTime || 'unknown'}` : 'Sample values only until the Twelve Data key is configured.'}</span><button className="text-button" onClick={() => setActiveTab('Prediction log')}>View prediction log →</button></div>
       </section>}
 
       {activeTab === 'R100 journal' && <section className="panel"><div className="panel-heading"><div><div className="eyebrow">DAILY PAPER CHALLENGE</div><h3>R100 performance journal</h3></div><span className="count-pill">{dailyJournal.length} days</span></div><div className="journal-summary"><div><span>Total simulated P/L</span><strong className={dailyJournal.reduce((sum,e)=>sum+e.pnl,0) >= 0 ? 'positive-text' : 'negative-text'}>{dailyJournal.reduce((sum,e)=>sum+e.pnl,0) >= 0 ? '+' : '−'}R{Math.abs(dailyJournal.reduce((sum,e)=>sum+e.pnl,0)).toFixed(2)}</strong></div><div><span>Days recorded</span><strong>{dailyJournal.length}</strong></div><div><span>Stake per day</span><strong>R100.00</strong></div></div>{dailyJournal.length === 0 ? <div className="empty-state"><div className="empty-icon"><BookOpen size={22}/></div><strong>Your journal is ready</strong><p>At the end of a trading day, choose “Close day & journal” to save the five-stock result. Each pick receives R20 of the imaginary R100.</p></div> : <div className="snapshot-list">{[...dailyJournal].sort((a,b)=>b.id.localeCompare(a.id)).map(entry => <div className="snapshot-card" key={entry.id}><div className="snapshot-head"><div><strong>{entry.id} · Starting stake R{entry.stake.toFixed(2)}</strong><small>Saved {new Date(entry.closedAt).toLocaleString()} · {entry.method}</small></div><span className={`signal ${entry.pnl >= 0 ? 'signal-momentum' : 'signal-watch'}`}>{entry.pnl >= 0 ? 'PROFIT' : 'LOSS'} · {entry.pnl >= 0 ? '+' : '−'}R{Math.abs(entry.pnl).toFixed(2)}</span></div><div className="table-wrap"><table><thead><tr><th>STOCK</th><th>STAKE</th><th>DAILY MOVE</th><th>PROFIT / LOSS</th><th>ENDING VALUE</th></tr></thead><tbody>{entry.picks.map(pick=><tr key={pick.symbol}><td><strong>{pick.symbol}</strong><small className="journal-stock-name">{pick.name}</small></td><td>R{pick.stake.toFixed(2)}</td><td><span className={`change ${pick.changePct >= 0 ? 'up' : 'down'}`}>{signedPercent(pick.changePct)}</span></td><td className={pick.pnl >= 0 ? 'positive-text' : 'negative-text'}>{pick.pnl >= 0 ? '+' : '−'}R{Math.abs(pick.pnl).toFixed(2)}</td><td>R{pick.closingValue.toFixed(2)}</td></tr>)}</tbody></table></div><p className="snapshot-note">{entry.dataMode === 'illustrative' ? 'SAMPLE RESULT: based on illustrative changes, not actual market closing prices. Do not treat as a verified trading result.' : 'Market data recorded for this session.'}</p></div>)}</div>}<div className="panel-footer"><span><BookOpen size={14}/> Journal is saved in this browser; export data for a backup.</span><button className="text-button" onClick={exportData}>Export journal →</button></div></section>}
@@ -307,6 +399,6 @@ export default function App() {
       <footer className="footer"><span>STOCKTRENDS <span className="footer-separator">/</span> EDUCATIONAL RESEARCH PROTOTYPE</span><span><ShieldCheck size={14} /> No broker connection · No real orders</span></footer>
     </main>
 
-    {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}><div className="detail-modal" role="dialog" aria-modal="true" aria-label="Stock details" onClick={event => event.stopPropagation()}><button className="modal-close" onClick={() => setSelected(null)} aria-label="Close"><X size={18} /></button><div className="eyebrow">CANDIDATE RESEARCH</div><h2>{selected.symbol || selected.name}</h2><p className="modal-company">{selected.name || 'Stocktrends prototype notes'}{selected.sector ? ` · ${selected.sector}` : ''}</p>{selected.price && <div className="modal-metrics"><div><small>Sample price</small><strong>{money(selected.referencePrice || selected.price)}</strong></div><div><small>Demo score</small><strong>{selected.score ?? '—'}</strong></div><div><small>Day move</small><strong className={(selected.change ?? selected.referenceChange ?? 0) >= 0 ? 'positive-text' : 'negative-text'}>{signedPercent(selected.change ?? selected.referenceChange ?? 0)}</strong></div></div>}<p>{selected.reason}</p>{selected.symbol && <a className="primary-button modal-link" href={`https://finance.yahoo.com/quote/${selected.symbol}/`} target="_blank" rel="noreferrer">Open market research <ExternalLink size={14} /></a>}<div className="modal-note">Sample data only. Research links are external. This is not financial advice and no live prediction is being made.</div></div></div>}
+    {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}><div className="detail-modal" role="dialog" aria-modal="true" aria-label="Stock details" onClick={event => event.stopPropagation()}><button className="modal-close" onClick={() => setSelected(null)} aria-label="Close"><X size={18} /></button><div className="eyebrow">CANDIDATE RESEARCH</div><h2>{selected.symbol || selected.name}</h2><p className="modal-company">{selected.name || 'Stocktrends prototype notes'}{selected.sector ? ` · ${selected.sector}` : ''}</p>{selected.price && <div className="modal-metrics"><div><small>Sample price</small><strong>{money(selected.referencePrice || selected.price)}</strong></div><div><small>Demo score</small><strong>{selected.score ?? '—'}</strong></div><div><small>Day move</small><strong className={(selected.change ?? selected.referenceChange ?? 0) >= 0 ? 'positive-text' : 'negative-text'}>{signedPercent(selected.change ?? selected.referenceChange ?? 0)}</strong></div></div>}<p>{selected.reason}</p>{selected.indicators && <div className="modal-metrics"><div><small>RSI (14)</small><strong>{selected.indicators.rsi.toFixed(1)}</strong></div><div><small>MACD histogram</small><strong>{selected.indicators.macdHistogram.toFixed(3)}</strong></div><div><small>ATR stop / target</small><strong>{money(selected.stopLoss)} / {money(selected.takeProfit)}</strong></div></div>}{selected.symbol && <a className="primary-button modal-link" href={`https://finance.yahoo.com/quote/${selected.symbol}/`} target="_blank" rel="noreferrer">Open market research <ExternalLink size={14} /></a>}<div className="modal-note">Sample data only. Research links are external. This is not financial advice and no live prediction is being made.</div></div></div>}
   </div>;
 }
