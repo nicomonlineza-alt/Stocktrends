@@ -146,7 +146,7 @@ export default function App() {
     } catch (error) { setNotice(`Could not start ${stock.symbol}: ${error.message}`); }
   }
 
-  async function closeBlueTrade(trade, forced = false) {
+  async function closeBlueTrade(trade, forced = false, reason = '') {
     if (!trade || trade.closedAt) return;
     try {
       const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(trade.symbol)}&interval=1min&outputsize=21`);
@@ -154,9 +154,9 @@ export default function App() {
       if (!response.ok || !payload.candles?.length) throw new Error(payload.error || 'Could not verify exit price.');
       const candle = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))).at(-1);
       const exitPrice = Number(candle.close), rawMove = (exitPrice-trade.entryPrice)/trade.entryPrice*100, pnlPct = trade.direction === 'DOWN' ? -rawMove : rawMove;
-      const closed = { ...trade, currentPrice:exitPrice, exitPrice, exitTime:candle.datetime, closedAt:new Date().toISOString(), status: forced ? 'FORCED CLOSED' : 'CLOSED', pnlPct, result: pnlPct >= 0 ? 'WIN' : 'LOSS' };
+      const closed = { ...trade, currentPrice:exitPrice, exitPrice, exitTime:candle.datetime, closedAt:new Date().toISOString(), status: forced ? 'FORCED CLOSED' : (reason ? reason : 'CLOSED'), exitReason: reason || (forced ? '10-MINUTE TIME LIMIT' : 'MANUAL SALE'), pnlPct, result: pnlPct >= 0 ? 'WIN' : 'LOSS' };
       setBlueTrades(previous=>previous.map(t=>t.id===trade.id?closed:t));
-      setNotice(`${trade.symbol} ${forced?'force-closed':'sold'}: ${pnlPct>=0?'+':''}${pnlPct.toFixed(3)}% simulated ${pnlPct>=0?'profit':'loss'}.`);
+      setNotice(`${trade.symbol} ${forced?'force-closed':(reason ? `AI sold (${reason})` : 'sold')}: ${pnlPct>=0?'+':''}${pnlPct.toFixed(3)}% simulated ${pnlPct>=0?'profit':'loss'}.`);
     } catch(error) { setNotice(`Exit for ${trade.symbol} not recorded: ${error.message}. Trade remains open for retry.`); }
   }
 
@@ -170,8 +170,30 @@ export default function App() {
           const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(trade.symbol)}&interval=1min&outputsize=21`);
           const payload = await response.json();
           if (response.ok && payload.candles?.length) {
-            const latest = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))).at(-1);
-            setBlueTrades(previous=>previous.map(t=>t.id===trade.id&&!t.closedAt?{...t,currentPrice:Number(latest.close)}:t));
+            const candles = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime)));
+            const latest = candles.at(-1);
+            const previous = candles.at(-2);
+            const recent = candles.slice(-4);
+            const price = Number(latest.close);
+            const rawMove = (price - trade.entryPrice) / trade.entryPrice * 100;
+            const livePnl = trade.direction === 'DOWN' ? -rawMove : rawMove;
+            // Rule-based AI-style exit checks: protect a gain, cap a loss, or exit on a short-term reversal.
+            const lastThreeMoves = recent.slice(1).map((candle, index) => {
+              const prior = recent[index];
+              const delta = Number(candle.close) - Number(prior.close);
+              return trade.direction === 'DOWN' ? -delta : delta;
+            });
+            const adverseMoves = lastThreeMoves.filter(move => move < 0).length;
+            const reversal = adverseMoves >= 2 && Number(latest.close) !== Number(latest.open) &&
+              (trade.direction === 'UP' ? Number(latest.close) < Number(latest.open) : Number(latest.close) > Number(latest.open));
+            let exitReason = '';
+            if (livePnl >= 0.35) exitReason = 'AI TAKE-PROFIT';
+            else if (livePnl <= -0.25) exitReason = 'AI RISK EXIT';
+            else if (reversal && livePnl > 0.02) exitReason = 'AI MOMENTUM REVERSAL';
+            setBlueTrades(previousTrades=>previousTrades.map(t=>t.id===trade.id&&!t.closedAt?{...t,currentPrice:price,lastCheckedAt:new Date().toISOString(),livePnlPct:livePnl,aiSignal:exitReason || 'MONITORING'}:t));
+            if (exitReason) {
+              await closeBlueTrade({...trade,currentPrice:price,aiSignal:exitReason}, false, exitReason);
+            }
           }
         } catch { /* retain last verified mark */ }
       }
@@ -507,7 +529,7 @@ export default function App() {
         <div className="table-wrap"><table><thead><tr><th>RANK</th><th>STOCK</th><th>LAST PRICE</th><th>5-MIN MOVE</th><th>SIGNAL SCORE</th><th>LAST CANDLE</th><th>ACTION</th></tr></thead><tbody>{blueStocks.map((stock,index)=><tr key={stock.symbol}><td>{String(index+1).padStart(2,'0')}</td><td><strong>{stock.symbol}</strong><small className="journal-stock-name">{stock.name}</small></td><td>{money(stock.price)}</td><td><span className={`change ${stock.change>=0?'up':'down'}`}>{signedPercent(stock.change)}</span></td><td><div className="score-cell"><div className="score-track"><span style={{width:`${stock.score}%`}}/></div><strong>{stock.score}</strong></div></td><td>{stock.candleTime?new Date(stock.candleTime.replace(' ','T')).toLocaleTimeString():'—'}</td><td><button className="small-button buy" disabled={blueTrades.some(t=>t.symbol===stock.symbol&&!t.closedAt)} onClick={()=>startBlueTrade(stock)}>{blueTrades.some(t=>t.symbol===stock.symbol&&!t.closedAt)?'Running':'Start'}</button></td></tr>)}</tbody></table></div>
         <div className="panel-heading blue-running-heading"><div><div className="eyebrow">10-MINUTE TRADE TRACKER</div><h3>Active & completed trades</h3></div><span className="count-pill">{blueTrades.length} total</span></div>
         {!blueTrades.length && <p className="subtle-label">No Blue trades yet. Start a stock above to begin tracking.</p>}
-        <div className="blue-trade-list">{[...blueTrades].map(trade=><div className="blue-trade-row" key={trade.id}><div><strong>{trade.symbol}</strong><small>{trade.status} · Entry {money(trade.entryPrice)}</small></div><div><strong>{trade.closedAt?money(trade.exitPrice):money(trade.currentPrice)}</strong><small>{trade.closedAt?'Exit price':`P/L ${signedPercent((trade.currentPrice-trade.entryPrice)/trade.entryPrice*100)}`}</small></div><div>{trade.closedAt?<span className={trade.pnlPct>=0?'positive-text':'negative-text'}>{signedPercent(trade.pnlPct)} · {trade.result}</span>:<><strong>{Math.max(0,Math.ceil((new Date(trade.endsAt).getTime()-blueClock)/1000))}s</strong><small>to forced sale</small></>}</div><div>{!trade.closedAt&&<button className="small-button sell" onClick={()=>closeBlueTrade(trade,false)}>Sell now</button>}</div></div>)}</div>
+        <div className="blue-trade-list">{[...blueTrades].map(trade=><div className="blue-trade-row" key={trade.id}><div><strong>{trade.symbol}</strong><small>{trade.status} · Entry {money(trade.entryPrice)}{!trade.closedAt && trade.aiSignal ? ` · ${trade.aiSignal}` : ''}</small></div><div><strong>{trade.closedAt?money(trade.exitPrice):money(trade.currentPrice)}</strong><small>{trade.closedAt?'Exit price':`P/L ${signedPercent((trade.currentPrice-trade.entryPrice)/trade.entryPrice*100)}`}</small></div><div>{trade.closedAt?<span className={trade.pnlPct>=0?'positive-text':'negative-text'}>{signedPercent(trade.pnlPct)} · {trade.result}</span>:<><strong>{Math.max(0,Math.ceil((new Date(trade.endsAt).getTime()-blueClock)/1000))}s</strong><small>to forced sale</small></>}</div><div>{!trade.closedAt&&<button className="small-button sell" onClick={()=>closeBlueTrade(trade,false)}>Sell now</button>}</div></div>)}</div>
         <p className="blue-disclaimer">Paper trading only — no real orders are placed. Five-minute candles update on the provider's cadence, and quotes may be delayed. Results are a research score, not a promise of profit. Active timers run while this dashboard is open.</p>
       </section>}
       {activeTab === 'Overview' && <section className="hour-pick-card">
