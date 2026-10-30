@@ -24,7 +24,7 @@ export default async function handler(req, res) {
   const requestedSize = Number.parseInt(String(req.query.outputsize || "21"), 10);
   const outputsize = Number.isFinite(requestedSize) ? Math.min(100, Math.max(21, requestedSize)) : 21;
 
-  if (!/^[A-Z.]{1,10}$/.test(symbol)) {
+  if (!/^[A-Z./]{1,12}$/.test(symbol)) {
     return res.status(400).json({ error: "Invalid stock symbol." });
   }
   if (!ALLOWED_INTERVALS.has(interval)) {
