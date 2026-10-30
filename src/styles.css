@@ -71,3 +71,26 @@
 .blue-trade-row small { color:var(--muted,#9aa8bb); font-size:11px; }
 .blue-disclaimer { margin-top:18px; font-size:12px; line-height:1.6; color:var(--muted,#9aa8bb); }
 @media (max-width: 760px) { .blue-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .blue-trade-row { grid-template-columns:1fr 1fr; gap:12px; } .blue-trade-row > div:last-child { align-items:flex-start; } }
+
+/* Red crypto and forex research dashboard */
+.red-nav-item { border-color: rgba(255, 85, 100, .16); }
+.red-nav-item.active, .red-nav-item:hover { border-color: rgba(255, 88, 105, .8); color: #fff; box-shadow: 0 0 22px rgba(255, 64, 88, .2); }
+.red-dashboard { border-color: rgba(255, 88, 105, .25); }
+.red-intro { margin: 8px 0 0; max-width: 680px; color: var(--muted, #9aa8bb); line-height: 1.55; }
+.red-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:20px 0; }
+.red-summary > div { display:flex; flex-direction:column; gap:8px; padding:16px; border:1px solid rgba(255,88,105,.2); border-radius:14px; background:rgba(130,35,52,.1); }
+.red-summary span { color:var(--muted,#9aa8bb); font-size:12px; }
+.red-summary strong { font-size:19px; color:var(--text,#f3f6fc); }
+.red-instrument-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.red-instrument-card { display:flex; flex-direction:column; gap:9px; min-width:0; padding:16px; border:1px solid rgba(255,255,255,.1); border-radius:14px; background:rgba(255,255,255,.035); }
+.red-instrument-top { display:flex; justify-content:space-between; align-items:center; }
+.red-rank { color:var(--muted,#9aa8bb); font-size:11px; }
+.red-type { padding:4px 8px; border-radius:999px; font-size:10px; letter-spacing:.04em; text-transform:uppercase; }
+.red-type.crypto { color:#ff9da9; background:rgba(255,88,105,.12); }
+.red-type.forex { color:#8dd8ff; background:rgba(80,160,255,.12); }
+.red-instrument-card > strong { font-size:17px; letter-spacing:.02em; }
+.red-instrument-name { color:var(--muted,#9aa8bb); font-size:12px; min-height:30px; }
+.red-research-note { font-size:10px; line-height:1.45; color:var(--muted,#9aa8bb); }
+.red-disclaimer { margin-top:18px; font-size:12px; line-height:1.6; color:var(--muted,#9aa8bb); }
+@media(max-width:900px) { .red-instrument-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:760px) { .red-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .red-instrument-grid { grid-template-columns:1fr; } }
