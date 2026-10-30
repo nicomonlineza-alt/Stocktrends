@@ -108,6 +108,8 @@ export default function App() {
   const [blueTrades, setBlueTrades] = useState(() => readStore('stocktrends-blue-trades-v1', []));
   const [blueBusy, setBlueBusy] = useState(false);
   const [blueClock, setBlueClock] = useState(Date.now());
+  const [redReview, setRedReview] = useState(() => readStore('stocktrends-red-review-v1', null));
+  const [redReviewBusy, setRedReviewBusy] = useState(false);
 
 
   useEffect(() => { localStorage.setItem(STORE.cash, JSON.stringify(cash)); }, [cash]);
@@ -122,6 +124,88 @@ export default function App() {
   useEffect(() => { const timer = setInterval(() => { setHourNow(Date.now()); setBlueClock(Date.now()); }, 1000); return () => clearInterval(timer); }, []);
   useEffect(() => { localStorage.setItem('stocktrends-blue-stocks-v1', JSON.stringify(blueStocks)); }, [blueStocks]);
   useEffect(() => { localStorage.setItem('stocktrends-blue-trades-v1', JSON.stringify(blueTrades)); }, [blueTrades]);
+  useEffect(() => { localStorage.setItem('stocktrends-red-review-v1', JSON.stringify(redReview)); }, [redReview]);
+
+  async function reviewRedPatterns() {
+    if (redReviewBusy) return;
+    setRedReviewBusy(true);
+    setNotice('');
+    const observations = [];
+    const unavailable = [];
+    try {
+      // Review historical five-minute candles; no trades or orders are created.
+      for (const instrument of RED_INSTRUMENTS) {
+        try {
+          const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(instrument.symbol)}&interval=5min&outputsize=30`);
+          const payload = await response.json();
+          if (!response.ok || !payload.candles?.length) {
+            unavailable.push({ symbol: instrument.symbol, reason: payload.error || 'No verified candles' });
+            continue;
+          }
+          const candles = [...payload.candles].sort((a,b) => String(a.datetime).localeCompare(String(b.datetime)));
+          for (let i = 20; i < candles.length - 1; i++) {
+            const window = candles.slice(i - 19, i + 1);
+            const current = candles[i], next = candles[i + 1], prior = candles[i - 1];
+            const closes = window.map(c => c.close);
+            const mean = closes.reduce((sum,v) => sum + v, 0) / closes.length;
+            const sd = Math.sqrt(closes.reduce((sum,v) => sum + (v - mean) ** 2, 0) / closes.length);
+            const lower = mean - 2 * sd, upper = mean + 2 * sd;
+            const gains = [], losses = [];
+            for (let j = Math.max(1, i - 13); j <= i; j++) {
+              const delta = candles[j].close - candles[j - 1].close;
+              if (delta >= 0) gains.push(delta); else losses.push(-delta);
+            }
+            const avgGain = gains.length ? gains.reduce((a,b)=>a+b,0) / 14 : 0;
+            const avgLoss = losses.length ? losses.reduce((a,b)=>a+b,0) / 14 : 0;
+            const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+            const nextPct = current.close ? (next.close - current.close) / current.close * 100 : 0;
+            observations.push({
+              symbol: instrument.symbol, type: instrument.type, time: current.datetime,
+              nextUp: nextPct > 0, nextPct,
+              bullishCandle: current.close > current.open,
+              bearishCandle: current.close < current.open,
+              momentumUp: current.close > prior.close,
+              momentumDown: current.close < prior.close,
+              nearLowerBand: sd > 0 && current.close <= lower + sd * 0.35,
+              nearUpperBand: sd > 0 && current.close >= upper - sd * 0.35,
+              rsiLow: rsi < 40, rsiHigh: rsi > 60,
+              volatility: current.close ? (current.high - current.low) / current.close * 100 : 0
+            });
+          }
+        } catch {
+          unavailable.push({ symbol: instrument.symbol, reason: 'Request failed' });
+        }
+      }
+      const rules = [
+        ['Bullish candle', o => o.bullishCandle],
+        ['Bearish candle', o => o.bearishCandle],
+        ['Upward momentum', o => o.momentumUp],
+        ['Downward momentum', o => o.momentumDown],
+        ['Near lower Bollinger Band', o => o.nearLowerBand],
+        ['Near upper Bollinger Band', o => o.nearUpperBand],
+        ['RSI below 40', o => o.rsiLow],
+        ['RSI above 60', o => o.rsiHigh]
+      ];
+      const patterns = rules.map(([name, test]) => {
+        const rows = observations.filter(test);
+        const ups = rows.filter(o => o.nextUp).length;
+        const avgNextMove = rows.length ? rows.reduce((sum,o)=>sum+o.nextPct,0) / rows.length : 0;
+        return { name, samples: rows.length, upRate: rows.length ? ups / rows.length * 100 : null, avgNextMove };
+      }).filter(p => p.samples > 0).sort((a,b) => (b.upRate ?? 0) - (a.upRate ?? 0));
+      const result = {
+        reviewedAt: new Date().toISOString(),
+        source: 'Twelve Data 5-minute candles',
+        instrumentsReviewed: RED_INSTRUMENTS.length - unavailable.length,
+        observations: observations.length,
+        unavailable,
+        patterns
+      };
+      setRedReview(result);
+      setNotice(`Review complete: ${result.instrumentsReviewed}/${RED_INSTRUMENTS.length} instruments and ${observations.length} candle observations analyzed.`);
+    } finally {
+      setRedReviewBusy(false);
+    }
+  }
 
   async function refreshBlueStocks() {
     if (blueBusy) return;
@@ -531,6 +615,7 @@ export default function App() {
       <div className="nav-label">WORKSPACE</div>
       <button className={`nav-item blue-nav-item ${activeTab === 'Blue Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Blue Dashboard')}><Activity size={18}/>Blue</button>
       <button className={`nav-item red-nav-item ${activeTab === 'Red Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Red Dashboard')}><Activity size={18}/>Red</button>
+      <button className={`nav-item red-review-nav-item ${activeTab === 'Red Review' ? 'active' : ''}`} onClick={() => setActiveTab('Red Review')}><BrainCircuit size={18}/>Review</button>
       {nav.map(({ name, icon: Icon }) => <button key={name} className={`nav-item ${activeTab === name ? 'active' : ''}`} onClick={() => setActiveTab(name)}><Icon size={18} />{name}</button>)}
       <div className="sidebar-bottom"><div className="status-dot" /><span>Paper research mode</span><span className="version">v0.2</span></div>
     </aside>
@@ -558,6 +643,15 @@ export default function App() {
         <div className="red-summary"><div><span>Crypto instruments</span><strong>15</strong></div><div><span>Forex pairs</span><strong>15</strong></div><div><span>Research interval</span><strong>5 min</strong></div><div><span>Mode</span><strong>Watchlist</strong></div></div>
         <div className="red-instrument-grid">{RED_INSTRUMENTS.map((instrument, index) => <article className="red-instrument-card" key={instrument.symbol}><div className="red-instrument-top"><span className="red-rank">{String(index + 1).padStart(2, '0')}</span><span className={`red-type ${instrument.type === 'Crypto' ? 'crypto' : 'forex'}`}>{instrument.type}</span></div><strong>{instrument.symbol}</strong><span className="red-instrument-name">{instrument.name}</span><span className="red-research-note">Research watchlist · price feed not yet verified</span></article>)}</div>
         <p className="red-disclaimer">Research and paper-monitoring view only. Live quotes, provider symbol compatibility, and AI-generated signals are not yet connected here. No orders are placed and no profit is guaranteed.</p>
+      </section>}
+      {activeTab === 'Red Review' && <section className="panel red-dashboard">
+        <div className="panel-heading"><div><div className="eyebrow">RED · PATTERN REVIEW</div><h3>Market pattern findings</h3><p className="red-intro">Compare recent five-minute candle conditions with the direction of the next candle. Findings are correlations, not proof of cause or reliable predictions.</p></div><button className="primary-button" onClick={reviewRedPatterns} disabled={redReviewBusy}><RotateCcw size={15}/>{redReviewBusy ? 'Reviewing markets…' : 'Review patterns'}</button></div>
+        {!redReview && <div className="empty-state"><div className="empty-icon"><BrainCircuit size={22}/></div><strong>No review run yet</strong><p>Press Review patterns to examine available crypto and forex candles. Instruments without verified provider data will be listed as unavailable.</p></div>}
+        {redReview && <><div className="red-summary"><div><span>Instruments reviewed</span><strong>{redReview.instrumentsReviewed}/30</strong></div><div><span>Candle observations</span><strong>{redReview.observations}</strong></div><div><span>Patterns checked</span><strong>{redReview.patterns.length}</strong></div><div><span>Last review</span><strong>{new Date(redReview.reviewedAt).toLocaleTimeString()}</strong></div></div>
+          <div className="table-wrap"><table><thead><tr><th>OBSERVED CONDITION</th><th>SAMPLES</th><th>NEXT CANDLE UP</th><th>AVERAGE NEXT MOVE</th><th>INTERPRETATION</th></tr></thead><tbody>{redReview.patterns.map(pattern => <tr key={pattern.name}><td><strong>{pattern.name}</strong></td><td>{pattern.samples}</td><td>{pattern.upRate === null ? '—' : pattern.upRate.toFixed(1) + '%'}</td><td className={pattern.avgNextMove >= 0 ? 'positive-text' : 'negative-text'}>{signedPercent(pattern.avgNextMove)}</td><td>{pattern.samples < 20 ? 'Too few samples to judge' : pattern.upRate >= 55 ? 'More upward outcomes in this sample' : pattern.upRate <= 45 ? 'More downward outcomes in this sample' : 'Mixed / no clear direction'}</td></tr>)}</tbody></table></div>
+          {redReview.unavailable.length > 0 && <p className="snapshot-note">Unavailable ({redReview.unavailable.length}): {redReview.unavailable.map(item=>item.symbol).join(', ')}. Check provider symbol support, API credits, and the API key.</p>}
+          <p className="red-disclaimer">Historical sample only. Patterns are descriptive correlations, not proven causes or guaranteed signals. This review does not place trades. Review time: {new Date(redReview.reviewedAt).toLocaleString()}.</p>
+        </>}
       </section>}
       {activeTab === 'Overview' && <section className="hour-pick-card">
         <div className="hour-pick-copy"><div className="eyebrow"><Clock3 size={13}/> ONE-HOUR AI PAPER RUN</div><h3>Test the next hour.</h3><p>Choose five stocks from the latest verified scan and measure the result after 60 minutes.</p>
