@@ -98,3 +98,5 @@
 .red-review-nav-item { margin-left: 24px; width: calc(100% - 24px); border-color: rgba(255, 88, 105, .12); color: #d2a5aa; }
 .red-review-nav-item.active, .red-review-nav-item:hover { border-color: rgba(255, 88, 105, .65); color: #fff; box-shadow: 0 0 18px rgba(255, 64, 88, .15); }
 @media(max-width:720px){.red-review-nav-item{margin-left:3px;width:auto}}
+
+.red-start-button { width:100%; justify-content:center; margin-top:4px; }
