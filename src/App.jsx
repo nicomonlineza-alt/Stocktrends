@@ -82,6 +82,13 @@ export default function App() {
   const [hourStarting, setHourStarting] = useState(false);
   const [hourFinishing, setHourFinishing] = useState(false);
   const [hourNow, setHourNow] = useState(Date.now());
+  const BLUE_SYMBOLS = ['NVDA','MSFT','AAPL','AMZN','META','GOOGL','TSLA','AVGO','AMD','COST','NFLX','ORCL','PLTR','INTC','QCOM','JPM','WMT','COIN','UBER','CRM'];
+  const BLUE_NAMES = { NFLX:'Netflix', ORCL:'Oracle', PLTR:'Palantir', INTC:'Intel', QCOM:'Qualcomm', JPM:'JPMorgan Chase', WMT:'Walmart', COIN:'Coinbase', UBER:'Uber', CRM:'Salesforce' };
+  const [blueStocks, setBlueStocks] = useState(() => readStore('stocktrends-blue-stocks-v1', []));
+  const [blueTrades, setBlueTrades] = useState(() => readStore('stocktrends-blue-trades-v1', []));
+  const [blueBusy, setBlueBusy] = useState(false);
+  const [blueClock, setBlueClock] = useState(Date.now());
+
 
   useEffect(() => { localStorage.setItem(STORE.cash, JSON.stringify(cash)); }, [cash]);
   useEffect(() => { localStorage.setItem(STORE.positions, JSON.stringify(positions)); }, [positions]);
@@ -92,7 +99,91 @@ export default function App() {
   useEffect(() => { localStorage.setItem('stocktrends-last-scan-v1', JSON.stringify(lastScanAt)); }, [lastScanAt]);
   useEffect(() => { localStorage.setItem('stocktrends-market-status-v1', JSON.stringify(marketStatus)); }, [marketStatus]);
   useEffect(() => { localStorage.setItem('stocktrends-one-hour-session-v1', JSON.stringify(hourSession)); }, [hourSession]);
-  useEffect(() => { const timer = setInterval(() => setHourNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => { const timer = setInterval(() => { setHourNow(Date.now()); setBlueClock(Date.now()); }, 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => { localStorage.setItem('stocktrends-blue-stocks-v1', JSON.stringify(blueStocks)); }, [blueStocks]);
+  useEffect(() => { localStorage.setItem('stocktrends-blue-trades-v1', JSON.stringify(blueTrades)); }, [blueTrades]);
+
+  async function refreshBlueStocks() {
+    if (blueBusy) return;
+    setBlueBusy(true);
+    try {
+      const updated = [];
+      // Keep requests sequential to reduce the chance of exhausting market-data credits.
+      for (const symbol of BLUE_SYMBOLS) {
+        try {
+          const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(symbol)}&interval=5min&outputsize=21`);
+          const payload = await response.json();
+          if (!response.ok || !payload.candles?.length) continue;
+          const candles = [...payload.candles].sort((a,b) => String(a.datetime).localeCompare(String(b.datetime)));
+          const latest = candles.at(-1), previous = candles.at(-2);
+          const change = previous?.close ? (latest.close - previous.close) / previous.close * 100 : 0;
+          const score = Math.round(Math.max(1, Math.min(99, 50 + change * 12 + (latest.close >= latest.open ? 8 : -8))));
+          updated.push({ symbol, name: CANDIDATES.find(s=>s.symbol===symbol)?.name || BLUE_NAMES[symbol] || symbol, price: latest.close, change, score, candleTime: latest.datetime, updatedAt: payload.fetchedAt, direction: change >= 0 ? 'UP' : 'DOWN' });
+        } catch { /* Keep scanning remaining symbols if one request fails. */ }
+      }
+      if (updated.length) {
+        setBlueStocks(updated.sort((a,b)=>b.score-a.score));
+        setNotice(`Blue refreshed ${updated.length}/20 stocks from Twelve Data 5-minute candles.`);
+      } else {
+        setNotice('Blue could not refresh verified 5-minute data. Check the Twelve Data key, credits, and market hours; sample values are not substituted.');
+      }
+    } finally { setBlueBusy(false); }
+  }
+
+  async function startBlueTrade(stock) {
+    if (blueTrades.some(t => t.symbol === stock.symbol && !t.closedAt)) {
+      setNotice(`${stock.symbol} already has an active 10-minute paper trade.`);
+      return;
+    }
+    try {
+      const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(stock.symbol)}&interval=1min&outputsize=21`);
+      const payload = await response.json();
+      if (!response.ok || !payload.candles?.length) throw new Error(payload.error || 'Verified live price unavailable.');
+      const candle = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))).at(-1);
+      const trade = { id: crypto.randomUUID?.() || String(Date.now()), symbol: stock.symbol, name: stock.name, direction: stock.direction || 'UP', entryPrice: Number(candle.close), currentPrice: Number(candle.close), startedAt: new Date().toISOString(), endsAt: new Date(Date.now()+10*60*1000).toISOString(), status:'RUNNING' };
+      setBlueTrades(previous=>[trade,...previous]);
+      setNotice(`Started ${stock.symbol}: 10-minute simulated trade. It will be force-closed at expiry.`);
+    } catch (error) { setNotice(`Could not start ${stock.symbol}: ${error.message}`); }
+  }
+
+  async function closeBlueTrade(trade, forced = false) {
+    if (!trade || trade.closedAt) return;
+    try {
+      const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(trade.symbol)}&interval=1min&outputsize=21`);
+      const payload = await response.json();
+      if (!response.ok || !payload.candles?.length) throw new Error(payload.error || 'Could not verify exit price.');
+      const candle = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))).at(-1);
+      const exitPrice = Number(candle.close), pnlPct = (exitPrice-trade.entryPrice)/trade.entryPrice*100;
+      const closed = { ...trade, currentPrice:exitPrice, exitPrice, exitTime:candle.datetime, closedAt:new Date().toISOString(), status: forced ? 'FORCED CLOSED' : 'CLOSED', pnlPct, result: pnlPct >= 0 ? 'WIN' : 'LOSS' };
+      setBlueTrades(previous=>previous.map(t=>t.id===trade.id?closed:t));
+      setNotice(`${trade.symbol} ${forced?'force-closed':'sold'}: ${pnlPct>=0?'+':''}${pnlPct.toFixed(3)}% simulated ${pnlPct>=0?'profit':'loss'}.`);
+    } catch(error) { setNotice(`Exit for ${trade.symbol} not recorded: ${error.message}. Trade remains open for retry.`); }
+  }
+
+  useEffect(() => {
+    if (!blueTrades.some(t=>!t.closedAt)) return;
+    const timer = setInterval(async () => {
+      const active = blueTrades.filter(t=>!t.closedAt);
+      for (const trade of active) {
+        if (Date.now() >= new Date(trade.endsAt).getTime()) { await closeBlueTrade(trade, true); continue; }
+        try {
+          const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(trade.symbol)}&interval=1min&outputsize=21`);
+          const payload = await response.json();
+          if (response.ok && payload.candles?.length) {
+            const latest = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))).at(-1);
+            setBlueTrades(previous=>previous.map(t=>t.id===trade.id&&!t.closedAt?{...t,currentPrice:Number(latest.close)}:t));
+          }
+        } catch { /* retain last verified mark */ }
+      }
+    }, 15000);
+    return ()=>clearInterval(timer);
+  }, [blueTrades]);
+  useEffect(() => {
+    if (activeTab !== 'Blue Dashboard') return;
+    if (!blueStocks.length) refreshBlueStocks();
+    const timer = setInterval(refreshBlueStocks, 5*60*1000);
+    return ()=>clearInterval(timer);
+  }, [activeTab]);
 
   // Lock the daily picks only after a verified market scan is available; never overwrite a saved day.
   useEffect(() => {
@@ -396,6 +487,7 @@ export default function App() {
     <aside className="sidebar">
       <a className="brand" href="#top" aria-label="Stocktrends home"><span className="brand-mark"><TrendingUp size={23} /></span><span>stock<span className="brand-accent">trends</span><small>MARKET INTELLIGENCE</small></span></a>
       <div className="nav-label">WORKSPACE</div>
+      <button className={`nav-item blue-nav-item ${activeTab === 'Blue Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Blue Dashboard')}><Activity size={18}/>Blue</button>
       {nav.map(({ name, icon: Icon }) => <button key={name} className={`nav-item ${activeTab === name ? 'active' : ''}`} onClick={() => setActiveTab(name)}><Icon size={18} />{name}</button>)}
       <div className="sidebar-bottom"><div className="status-dot" /><span>Paper research mode</span><span className="version">v0.2</span></div>
     </aside>
@@ -408,6 +500,16 @@ export default function App() {
 
       <section className="welcome-row"><div><div className="eyebrow">DAILY RESEARCH BRIEFING · {todayKey()}</div><h2>Five picks. <span>R100 on the line.</span></h2><p>Scan the market, compare indicator patterns, and let the paper trader test rule-based entries and exits. No real orders are placed.</p><div className="eyebrow market-status-line">{marketStatus}{scanning ? ` · ${scanProgress.done}/${scanProgress.total}` : ''}</div>{learnedWeights.learned && <small className="subtle-label">Adaptive weights trained on {learnedWeights.sampleSize} closed paper trades</small>}</div><div className="welcome-actions"><button className="primary-button" onClick={scanMarket} disabled={scanning}><Activity size={15} /> {scanning ? `Scanning ${scanProgress.done}/${scanProgress.total}` : 'Scan market & paper trade'}</button><button className="secondary-button" onClick={exportData}><ExternalLink size={15} /> Export data</button><button className="secondary-button" onClick={closeDailySession} disabled={dailyJournal.some(entry => entry.id === todayKey())}><BookOpen size={16} /> {dailyJournal.some(entry => entry.id === todayKey()) ? 'Today saved' : 'Close day & journal'}</button></div></section>
 
+      {activeTab === 'Blue Dashboard' && <section className="panel blue-dashboard">
+        <div className="panel-heading"><div><div className="eyebrow">BLUE · 5-MINUTE MOMENTUM SCAN</div><h3>20 stocks to watch <span className="count-pill">{blueStocks.length}/20</span></h3><p className="blue-intro">Ranked from verified 5-minute candles. Select Start to open a 10-minute paper trade; sell early or let the timer force-close it.</p></div><button className="primary-button" onClick={refreshBlueStocks} disabled={blueBusy}><RotateCcw size={15}/>{blueBusy?'Refreshing…':'Refresh 5-min ticker'}</button></div>
+        <div className="blue-summary"><div><span>Closed trades</span><strong>{blueTrades.filter(t=>t.closedAt).length}</strong></div><div><span>Wins / losses</span><strong>{blueTrades.filter(t=>t.result==='WIN').length} / {blueTrades.filter(t=>t.result==='LOSS').length}</strong></div><div><span>Win rate</span><strong>{blueTrades.some(t=>t.closedAt)?Math.round(blueTrades.filter(t=>t.result==='WIN').length/blueTrades.filter(t=>t.closedAt).length*100)+'%':'—'}</strong></div><div><span>Net % score</span><strong className={blueTrades.filter(t=>t.closedAt).reduce((s,t)=>s+(t.pnlPct||0),0)>=0?'positive-text':'negative-text'}>{signedPercent(blueTrades.filter(t=>t.closedAt).reduce((s,t)=>s+(t.pnlPct||0),0))}</strong></div></div>
+        {!blueStocks.length && <div className="empty-state"><strong>No verified 5-minute prices yet</strong><p>Refresh after checking your Twelve Data API key and remaining credits. The dashboard deliberately does not invent prices.</p></div>}
+        <div className="table-wrap"><table><thead><tr><th>RANK</th><th>STOCK</th><th>LAST PRICE</th><th>5-MIN MOVE</th><th>SIGNAL SCORE</th><th>LAST CANDLE</th><th>ACTION</th></tr></thead><tbody>{blueStocks.map((stock,index)=><tr key={stock.symbol}><td>{String(index+1).padStart(2,'0')}</td><td><strong>{stock.symbol}</strong><small className="journal-stock-name">{stock.name}</small></td><td>{money(stock.price)}</td><td><span className={`change ${stock.change>=0?'up':'down'}`}>{signedPercent(stock.change)}</span></td><td><div className="score-cell"><div className="score-track"><span style={{width:`${stock.score}%`}}/></div><strong>{stock.score}</strong></div></td><td>{stock.candleTime?new Date(stock.candleTime.replace(' ','T')).toLocaleTimeString():'—'}</td><td><button className="small-button buy" disabled={blueTrades.some(t=>t.symbol===stock.symbol&&!t.closedAt)} onClick={()=>startBlueTrade(stock)}>{blueTrades.some(t=>t.symbol===stock.symbol&&!t.closedAt)?'Running':'Start'}</button></td></tr>)}</tbody></table></div>
+        <div className="panel-heading blue-running-heading"><div><div className="eyebrow">10-MINUTE TRADE TRACKER</div><h3>Active & completed trades</h3></div><span className="count-pill">{blueTrades.length} total</span></div>
+        {!blueTrades.length && <p className="subtle-label">No Blue trades yet. Start a stock above to begin tracking.</p>}
+        <div className="blue-trade-list">{[...blueTrades].map(trade=><div className="blue-trade-row" key={trade.id}><div><strong>{trade.symbol}</strong><small>{trade.status} · Entry {money(trade.entryPrice)}</small></div><div><strong>{trade.closedAt?money(trade.exitPrice):money(trade.currentPrice)}</strong><small>{trade.closedAt?'Exit price':`P/L ${signedPercent((trade.currentPrice-trade.entryPrice)/trade.entryPrice*100)}`}</small></div><div>{trade.closedAt?<span className={trade.pnlPct>=0?'positive-text':'negative-text'}>{signedPercent(trade.pnlPct)} · {trade.result}</span>:<><strong>{Math.max(0,Math.ceil((new Date(trade.endsAt).getTime()-blueClock)/1000))}s</strong><small>to forced sale</small></>}</div><div>{!trade.closedAt&&<button className="small-button sell" onClick={()=>closeBlueTrade(trade,false)}>Sell now</button>}</div></div>)}</div>
+        <p className="blue-disclaimer">Paper trading only — no real orders are placed. Five-minute candles update on the provider's cadence, and quotes may be delayed. Results are a research score, not a promise of profit. Active timers run while this dashboard is open.</p>
+      </section>}
       {activeTab === 'Overview' && <section className="hour-pick-card">
         <div className="hour-pick-copy"><div className="eyebrow"><Clock3 size={13}/> ONE-HOUR AI PAPER RUN</div><h3>Test the next hour.</h3><p>Choose five stocks from the latest verified scan and measure the result after 60 minutes.</p>
         {hourSession && <div className="hour-session-status">{hourSession.completedAt ? <><strong className={hourSession.pnl >= 0 ? 'positive-text' : 'negative-text'}>{hourSession.pnl >= 0 ? '+' : '−'}R{Math.abs(hourSession.pnl).toFixed(2)}</strong><span>Final simulated P/L · {new Date(hourSession.completedAt).toLocaleString()}</span></> : <><strong>{Math.max(0, Math.ceil((new Date(hourSession.endsAt).getTime() - hourNow) / 1000 / 60))} min remaining</strong><span>Started {new Date(hourSession.startedAt).toLocaleTimeString()} · tracking 5 picks</span></>}</div>}
