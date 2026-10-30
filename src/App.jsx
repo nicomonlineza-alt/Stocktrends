@@ -153,7 +153,7 @@ export default function App() {
       const payload = await response.json();
       if (!response.ok || !payload.candles?.length) throw new Error(payload.error || 'Could not verify exit price.');
       const candle = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))).at(-1);
-      const exitPrice = Number(candle.close), pnlPct = (exitPrice-trade.entryPrice)/trade.entryPrice*100;
+      const exitPrice = Number(candle.close), rawMove = (exitPrice-trade.entryPrice)/trade.entryPrice*100, pnlPct = trade.direction === 'DOWN' ? -rawMove : rawMove;
       const closed = { ...trade, currentPrice:exitPrice, exitPrice, exitTime:candle.datetime, closedAt:new Date().toISOString(), status: forced ? 'FORCED CLOSED' : 'CLOSED', pnlPct, result: pnlPct >= 0 ? 'WIN' : 'LOSS' };
       setBlueTrades(previous=>previous.map(t=>t.id===trade.id?closed:t));
       setNotice(`${trade.symbol} ${forced?'force-closed':'sold'}: ${pnlPct>=0?'+':''}${pnlPct.toFixed(3)}% simulated ${pnlPct>=0?'profit':'loss'}.`);
