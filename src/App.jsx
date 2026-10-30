@@ -78,6 +78,10 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const [selected, setSelected] = useState(null);
   const [tradeSize, setTradeSize] = useState('1');
+  const [hourSession, setHourSession] = useState(() => readStore('stocktrends-one-hour-session-v1', null));
+  const [hourStarting, setHourStarting] = useState(false);
+  const [hourFinishing, setHourFinishing] = useState(false);
+  const [hourNow, setHourNow] = useState(Date.now());
 
   useEffect(() => { localStorage.setItem(STORE.cash, JSON.stringify(cash)); }, [cash]);
   useEffect(() => { localStorage.setItem(STORE.positions, JSON.stringify(positions)); }, [positions]);
@@ -87,6 +91,8 @@ export default function App() {
   useEffect(() => { localStorage.setItem('stocktrends-live-stocks-v1', JSON.stringify(liveStocks)); }, [liveStocks]);
   useEffect(() => { localStorage.setItem('stocktrends-last-scan-v1', JSON.stringify(lastScanAt)); }, [lastScanAt]);
   useEffect(() => { localStorage.setItem('stocktrends-market-status-v1', JSON.stringify(marketStatus)); }, [marketStatus]);
+  useEffect(() => { localStorage.setItem('stocktrends-one-hour-session-v1', JSON.stringify(hourSession)); }, [hourSession]);
+  useEffect(() => { const timer = setInterval(() => setHourNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
 
   // Lock the daily picks only after a verified market scan is available; never overwrite a saved day.
   useEffect(() => {
@@ -265,6 +271,59 @@ export default function App() {
     }
   }
 
+
+  async function startOneHourPick() {
+    if (hourStarting || hourFinishing || (hourSession && !hourSession.completedAt)) return;
+    if (!liveStocks.length) {
+      setNotice('Run “Scan market & paper trade” first so Pick Now uses verified market data, not sample prices.');
+      return;
+    }
+    setHourStarting(true);
+    try {
+      const candidates = rankCandidates(liveStocks).slice(0, 5);
+      const picks = [];
+      for (const stock of candidates) {
+        const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(stock.symbol)}&interval=1min&outputsize=21`);
+        const payload = await response.json();
+        if (!response.ok || !payload.candles?.length) throw new Error(payload.error || `Could not get a verified entry price for ${stock.symbol}.`);
+        const latest = [...payload.candles].sort((a,b) => String(a.datetime).localeCompare(String(b.datetime))).at(-1);
+        picks.push({ symbol: stock.symbol, name: stock.name, score: stock.score, entryPrice: Number(latest.close), entryTime: latest.datetime, direction: stock.action === 'SELL' ? 'DOWN' : 'UP', reason: stock.reason });
+      }
+      const startedAt = new Date().toISOString();
+      setHourSession({ id: crypto.randomUUID?.() || String(Date.now()), startedAt, endsAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), stakePerPick: 1000, picks, dataMode: 'live', status: 'running' });
+      setNotice('One-hour paper session started. Prices are tracked for research only; no real orders are placed.');
+    } catch (error) {
+      setNotice(`Pick Now could not start: ${error?.message || 'Live market data unavailable.'}`);
+    } finally { setHourStarting(false); }
+  }
+
+  async function finishOneHourPick(session = hourSession) {
+    if (!session || session.completedAt || hourFinishing) return;
+    setHourFinishing(true);
+    try {
+      const picks = [];
+      for (const pick of session.picks) {
+        const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(pick.symbol)}&interval=1min&outputsize=21`);
+        const payload = await response.json();
+        if (!response.ok || !payload.candles?.length) throw new Error(payload.error || `Could not verify the closing price for ${pick.symbol}.`);
+        const latest = [...payload.candles].sort((a,b) => String(a.datetime).localeCompare(String(b.datetime))).at(-1);
+        const exitPrice = Number(latest.close);
+        const changePct = (exitPrice - pick.entryPrice) / pick.entryPrice * 100;
+        picks.push({ ...pick, exitPrice, exitTime: latest.datetime, changePct, pnl: session.stakePerPick * changePct / 100 });
+      }
+      const pnl = picks.reduce((sum, pick) => sum + pick.pnl, 0);
+      setHourSession({ ...session, picks, completedAt: new Date().toISOString(), status: 'completed', pnl, endingValue: picks.length * session.stakePerPick + pnl });
+      setNotice(`One-hour paper session complete: ${pnl >= 0 ? 'profit' : 'loss'} R${Math.abs(pnl).toFixed(2)} (simulated).`);
+    } catch (error) {
+      setNotice(`Could not verify the one-hour result: ${error?.message || 'Live prices unavailable.'} The session remains open so you can retry.`);
+    } finally { setHourFinishing(false); }
+  }
+
+  useEffect(() => {
+    if (!hourSession || hourSession.completedAt || hourNow < new Date(hourSession.endsAt).getTime()) return;
+    finishOneHourPick(hourSession);
+  }, [hourNow, hourSession]);
+
   function resetPaperAccount() {
     if (!window.confirm('Reset simulated cash, positions and trade history? Daily prediction records will be preserved.')) return;
     setCash(STARTING_CASH); setPositions({}); setTrades([]);
@@ -349,6 +408,12 @@ export default function App() {
 
       <section className="welcome-row"><div><div className="eyebrow">DAILY RESEARCH BRIEFING · {todayKey()}</div><h2>Five picks. <span>R100 on the line.</span></h2><p>Scan the market, compare indicator patterns, and let the paper trader test rule-based entries and exits. No real orders are placed.</p><div className="eyebrow market-status-line">{marketStatus}{scanning ? ` · ${scanProgress.done}/${scanProgress.total}` : ''}</div>{learnedWeights.learned && <small className="subtle-label">Adaptive weights trained on {learnedWeights.sampleSize} closed paper trades</small>}</div><div className="welcome-actions"><button className="primary-button" onClick={scanMarket} disabled={scanning}><Activity size={15} /> {scanning ? `Scanning ${scanProgress.done}/${scanProgress.total}` : 'Scan market & paper trade'}</button><button className="secondary-button" onClick={exportData}><ExternalLink size={15} /> Export data</button><button className="secondary-button" onClick={closeDailySession} disabled={dailyJournal.some(entry => entry.id === todayKey())}><BookOpen size={16} /> {dailyJournal.some(entry => entry.id === todayKey()) ? 'Today saved' : 'Close day & journal'}</button></div></section>
 
+      {activeTab === 'Overview' && <section className="hour-pick-card">
+        <div className="hour-pick-copy"><div className="eyebrow"><Clock3 size={13}/> ONE-HOUR AI PAPER RUN</div><h3>Test the next hour.</h3><p>Choose five stocks from the latest verified scan and measure the result after 60 minutes.</p>
+        {hourSession && <div className="hour-session-status">{hourSession.completedAt ? <><strong className={hourSession.pnl >= 0 ? 'positive-text' : 'negative-text'}>{hourSession.pnl >= 0 ? '+' : '−'}R{Math.abs(hourSession.pnl).toFixed(2)}</strong><span>Final simulated P/L · {new Date(hourSession.completedAt).toLocaleString()}</span></> : <><strong>{Math.max(0, Math.ceil((new Date(hourSession.endsAt).getTime() - hourNow) / 1000 / 60))} min remaining</strong><span>Started {new Date(hourSession.startedAt).toLocaleTimeString()} · tracking 5 picks</span></>}</div>}
+        </div><div className="hour-pick-action"><button className="primary-button pick-now-button" onClick={hourSession && !hourSession.completedAt ? () => setNotice('This one-hour session is already running.') : startOneHourPick} disabled={hourStarting || hourFinishing || Boolean(hourSession && !hourSession.completedAt)}><Sparkles size={16}/>{hourStarting ? 'Selecting…' : hourSession && !hourSession.completedAt ? 'Session running' : 'Pick Now'}</button><small>{hourFinishing ? 'Verifying latest prices…' : 'Paper trading only · No real orders'}</small></div>
+        {hourSession && <div className="hour-pick-results"><div className="hour-pick-table"><div className="hour-table-head"><span>STOCK</span><span>ENTRY</span><span>{hourSession.completedAt ? 'EXIT' : 'BIAS'}</span><span>{hourSession.completedAt ? 'P/L' : 'STATUS'}</span></div>{hourSession.picks.map(pick=><div className="hour-table-row" key={pick.symbol}><strong>{pick.symbol}</strong><span>{money(pick.entryPrice)}</span><span>{hourSession.completedAt ? money(pick.exitPrice) : pick.direction}</span><span className={hourSession.completedAt ? (pick.pnl >= 0 ? 'positive-text' : 'negative-text') : ''}>{hourSession.completedAt ? `${pick.pnl >= 0 ? '+' : '−'}R${Math.abs(pick.pnl).toFixed(2)}` : 'Tracking'}</span></div>)}</div>{hourSession.completedAt && <div className="hour-total"><span>One-hour total · R{(hourSession.picks.length * hourSession.stakePerPick).toLocaleString()} simulated stake</span><strong className={hourSession.pnl >= 0 ? 'positive-text' : 'negative-text'}>{hourSession.pnl >= 0 ? '+' : '−'}R{Math.abs(hourSession.pnl).toFixed(2)} ({signedPercent(hourSession.pnl / (hourSession.picks.length * hourSession.stakePerPick) * 100)})</strong><small>Calculated from verified market-data prices. Historical prices may update only when the market is open.</small></div>}</div>}
+      </section>}
       <section className="stats-grid">
         <StatCard label="Paper portfolio" value={money(portfolioValue)} detail={`Starting cash: ${money(STARTING_CASH)}`} icon={<Wallet size={18} />} />
         <StatCard label="Total simulated P/L" value={`${totalPnl >= 0 ? '+' : '−'}${money(Math.abs(totalPnl))}`} detail={`${signedPercent(totalPnl / STARTING_CASH * 100)} since start · sample marks`} tone={totalPnl >= 0 ? 'positive-text' : 'negative-text'} icon={<Activity size={18} />} />
