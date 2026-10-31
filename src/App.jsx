@@ -40,6 +40,19 @@ const RED_INSTRUMENTS = [
   { symbol: 'USD/ZAR', name: 'US Dollar / South African Rand', type: 'Forex' }
 ];
 
+const GREEN_INSTRUMENTS = [
+  ...[
+    {symbol:'NVDA',name:'NVIDIA Corporation',type:'Stock'},{symbol:'MSFT',name:'Microsoft',type:'Stock'},
+    {symbol:'AAPL',name:'Apple',type:'Stock'},{symbol:'AMZN',name:'Amazon',type:'Stock'},
+    {symbol:'GOOGL',name:'Alphabet',type:'Stock'},{symbol:'META',name:'Meta Platforms',type:'Stock'},
+    {symbol:'TSLA',name:'Tesla',type:'Stock'},{symbol:'AVGO',name:'Broadcom',type:'Stock'},
+    {symbol:'AMD',name:'AMD',type:'Stock'},{symbol:'COST',name:'Costco',type:'Stock'}
+  ],
+  ...RED_INSTRUMENTS.filter(item=>item.type==='Crypto').slice(0,5),
+  ...RED_INSTRUMENTS.filter(item=>item.type==='Forex').slice(0,5)
+].map(item=>({...item,marketMode:'Green'}));
+const formatRemaining = milliseconds => {const total=Math.max(0,Math.ceil(milliseconds/1000));const h=Math.floor(total/3600),m=Math.floor((total%3600)/60),s=total%60;return h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${m}:${String(s).padStart(2,'0')}`;};
+
 const CANDIDATES = [
   { symbol: 'NVDA', name: 'NVIDIA Corporation', sector: 'Semiconductors', price: 182.42, change: 2.34, momentum: 88, relativeStrength: 82, volume: 78, volatility: 58, reason: 'Positive sample momentum and relative strength; volatility remains a risk.' },
   { symbol: 'MSFT', name: 'Microsoft Corporation', sector: 'Software', price: 521.18, change: 0.86, momentum: 72, relativeStrength: 76, volume: 64, volatility: 30, reason: 'Positive sample trend with comparatively lower illustrative volatility.' },
@@ -125,6 +138,10 @@ export default function App() {
   const [blueClock, setBlueClock] = useState(Date.now());
   const [redReview, setRedReview] = useState(() => readStore('stocktrends-red-review-v1', null));
   const [redReviewBusy, setRedReviewBusy] = useState(false);
+  const [greenStocks, setGreenStocks] = useState(() => readStore('stocktrends-green-stocks-v1', []));
+  const [greenBusy, setGreenBusy] = useState(false);
+  const [greenReview, setGreenReview] = useState(() => readStore('stocktrends-green-review-v1', null));
+  const [greenReviewBusy, setGreenReviewBusy] = useState(false);
   const [learningJournal, setLearningJournal] = useState(() => readStore('stocktrends-learning-journal-v1', []));
   const [cloudEmail, setCloudEmail] = useState('');
   const [cloudUser, setCloudUser] = useState(null);
@@ -250,7 +267,7 @@ export default function App() {
       legacy: !trade.entrySnapshot && !trade.exitSnapshot
     }));
     const timedEvents = blueTrades.flatMap(trade => {
-      const mode = RED_INSTRUMENTS.some(item => item.symbol === trade.symbol) ? 'Red crypto/forex' : 'Blue stocks';
+      const mode = trade.marketMode === 'Green' ? 'Green 3-hour mixed markets' : RED_INSTRUMENTS.some(item => item.symbol === trade.symbol) ? 'Red crypto/forex' : 'Blue stocks';
       const events = [{
         id: trade.id, time: trade.startedAt, symbol: trade.symbol, mode, event: 'ENTRY',
         price: trade.entryPrice, pnl: null, outcome: 'ENTRY', reason: 'Timed paper session started',
@@ -277,6 +294,8 @@ export default function App() {
   }, [trades, blueTrades]);
 
   useEffect(() => { localStorage.setItem('stocktrends-red-review-v1', JSON.stringify(redReview)); }, [redReview]);
+  useEffect(() => { localStorage.setItem('stocktrends-green-stocks-v1', JSON.stringify(greenStocks)); }, [greenStocks]);
+  useEffect(() => { localStorage.setItem('stocktrends-green-review-v1', JSON.stringify(greenReview)); }, [greenReview]);
 
   async function reviewRedPatterns() {
     if (redReviewBusy) return;
@@ -384,6 +403,57 @@ export default function App() {
     }
   }
 
+  async function reviewGreenPatterns() {
+    if(greenReviewBusy)return; setGreenReviewBusy(true); setNotice('');
+    const observations=[],unavailable=[];
+    try {
+      for(const instrument of GREEN_INSTRUMENTS){
+        try{
+          const response=await fetch(`/api/market-data?symbol=${encodeURIComponent(instrument.symbol)}&interval=15min&outputsize=100`),payload=await response.json();
+          if(!response.ok||!payload.candles?.length){unavailable.push({symbol:instrument.symbol,reason:payload.error||'No verified candles'});continue;}
+          const candles=[...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime)));
+          for(let i=21;i<candles.length-1;i++){
+            const c=candles[i],n=candles[i+1],p=candles[i-1],closes=candles.slice(i-19,i+1).map(x=>Number(x.close));
+            const mean=closes.reduce((s,v)=>s+v,0)/closes.length,sd=Math.sqrt(closes.reduce((s,v)=>s+(v-mean)**2,0)/closes.length);
+            const nextPct=Number(c.close)?(Number(n.close)-Number(c.close))/Number(c.close)*100:0,delta=Number(c.close)-Number(p.close),range=Number(c.close)?(Number(c.high)-Number(c.low))/Number(c.close)*100:0;
+            observations.push({symbol:instrument.symbol,type:instrument.type,time:c.datetime,nextUp:nextPct>0,nextPct,bullish:Number(c.close)>Number(c.open),bearish:Number(c.close)<Number(c.open),momentumUp:delta>0,momentumDown:delta<0,lower:sd>0&&Number(c.close)<=mean-1.5*sd,upper:sd>0&&Number(c.close)>=mean+1.5*sd,highVol:range>=0.5,lowVol:range<0.5,volatility:range});
+          }
+        }catch{unavailable.push({symbol:instrument.symbol,reason:'Request failed'});}
+      }
+      const rules=[['Bullish candle',o=>o.bullish],['Bearish candle',o=>o.bearish],['Upward momentum',o=>o.momentumUp],['Downward momentum',o=>o.momentumDown],['Near lower Bollinger Band',o=>o.lower],['Near upper Bollinger Band',o=>o.upper],['Higher volatility',o=>o.highVol],['Lower volatility',o=>o.lowVol]];
+      const patterns=rules.map(([name,test])=>{const rows=observations.filter(test),ups=rows.filter(o=>o.nextUp).length,avgNextMove=rows.length?rows.reduce((s,o)=>s+o.nextPct,0)/rows.length:0;return{name,samples:rows.length,upRate:rows.length?ups/rows.length*100:null,avgNextMove,directionalAccuracy:rows.length?Math.max(ups,rows.length-ups)/rows.length*100:null};}).filter(p=>p.samples).sort((a,b)=>(b.directionalAccuracy||0)-(a.directionalAccuracy||0));
+      const completed=blueTrades.filter(t=>t.marketMode==='Green'&&t.closedAt&&Number.isFinite(Number(t.pnlPct))),wins=completed.filter(t=>Number(t.pnlPct)>0).length,winRate=completed.length?wins/completed.length*100:null;
+      const coverage=(GREEN_INSTRUMENTS.length-unavailable.length)/GREEN_INSTRUMENTS.length,sampleScore=Math.min(1,observations.length/500),breadthScore=Math.min(1,patterns.filter(p=>p.samples>=20).length/6),optimizationScore=Math.round(100*(coverage*.4+sampleScore*.35+breadthScore*.25)),bestPatterns=patterns.filter(p=>p.samples>=20&&p.directionalAccuracy>=55).slice(0,3);
+      const result={reviewedAt:new Date().toISOString(),source:'Green mixed-market 15-minute candles / three-hour paper sessions',instrumentsReviewed:GREEN_INSTRUMENTS.length-unavailable.length,observations:observations.length,unavailable,patterns,closedSessions:completed.length,winRate,optimizationScore,bestPatterns,summary:observations.length ? `Reviewed ${observations.length} next-candle outcomes across ${GREEN_INSTRUMENTS.length-unavailable.length} available instruments. ${bestPatterns.length?'Most promising historical conditions: '+bestPatterns.map(p=>p.name).join(', ')+'.':'No condition has enough separation to stand out yet.'} ${completed.length ? `Completed Green sessions show a ${winRate.toFixed(1)}% win rate across ${completed.length} sessions.` : 'No completed Green sessions yet; findings are preliminary.'}` : 'No usable 15-minute candle observations were returned. Check provider access and try again.'};
+      setGreenReview(result);
+      if(supabase&&cloudUser?.id){
+        const {error}=await supabase.from('learning_review_runs').insert({user_id:cloudUser.id,source:'green-review',sample_count:result.observations,unavailable_count:result.unavailable.length,patterns:result.patterns,summary:result.summary,optimisation_score:result.optimizationScore,methodology:'Completed 15-minute candles; next-candle outcomes; candle direction, momentum, Bollinger proximity and volatility; completed Green paper-session results. Correlations are not profit forecasts.'});
+        if(error)setNotice(`Green Review saved locally, but cloud recording failed: ${error.message}`);
+        else setNotice(`Green Review saved to Supabase: ${result.instrumentsReviewed}/20 markets, ${result.observations} candle outcomes, research score ${optimizationScore}%.`);
+      }else setNotice(`Green Review saved on this device. Sign in to Cloud Learning Journal to save findings to Supabase. Research score: ${optimizationScore}%.`);
+    }finally{setGreenReviewBusy(false);}
+  }
+
+  async function refreshGreenStocks() {
+    if(greenBusy)return; setGreenBusy(true);
+    try{
+      const updated=[];
+      for(const instrument of GREEN_INSTRUMENTS){
+        try{
+          const response=await fetch(`/api/market-data?symbol=${encodeURIComponent(instrument.symbol)}&interval=15min&outputsize=60`),payload=await response.json();
+          if(!response.ok||!payload.candles?.length){updated.push({...instrument,unavailable:true,reason:payload.error||'No verified market data available',score:0,price:null,change:null,candleTime:null});continue;}
+          const candles=[...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))),latest=candles.at(-1),previous=candles.at(-2),first=candles.at(-Math.min(5,candles.length));
+          const change=previous?.close?(Number(latest.close)-Number(previous.close))/Number(previous.close)*100:0,horizon=first?.close?(Number(latest.close)-Number(first.close))/Number(first.close)*100:change;
+          const score=Math.round(Math.max(1,Math.min(99,50+horizon*9+(change>=0?5:-5))));
+          updated.push({...instrument,price:Number(latest.close),change,horizonMove:horizon,score,candleTime:latest.datetime,updatedAt:payload.fetchedAt,direction:horizon>=0?'UP':'DOWN',reason:'Ranked from verified 15-minute candles for a three-hour paper session.',dataMode:'Twelve Data · 15min'});
+        }catch{/* Continue to next instrument. */}
+        if(!updated.some(item=>item.symbol===instrument.symbol))updated.push({...instrument,unavailable:true,reason:'No verified market data available',score:0,price:null,change:null,candleTime:null});
+      }
+      if(updated.length){setGreenStocks(updated.sort((a,b)=>b.score-a.score).slice(0,20));setNotice(`Green refreshed ${Math.min(20,updated.length)}/20 mixed-market options from verified 15-minute candles.`);}
+      else setNotice('Green could not refresh verified market data. Check Twelve Data credits, symbol support, and market hours; sample prices are not substituted.');
+    }finally{setGreenBusy(false);}
+  }
+
   async function refreshBlueStocks() {
     if (blueBusy) return;
     setBlueBusy(true);
@@ -413,7 +483,7 @@ export default function App() {
 
   async function startBlueTrade(stock) {
     if (blueTrades.some(t => t.symbol === stock.symbol && !t.closedAt)) {
-      setNotice(`${stock.symbol} already has an active 10-minute paper trade.`);
+      setNotice(`${stock.symbol} already has an active paper session.`);
       return;
     }
     try {
@@ -424,10 +494,12 @@ export default function App() {
       const candle = candles.at(-1), entryPrice = Number(candle.close), startedAt = new Date().toISOString();
       let indicators = {};
       try { if (candles.length >= 35) { const analysis = analyzeCandles(candles); indicators = { indicators: analysis.indicators, signalFeatures: analysis.signalFeatures, score: analysis.score, direction: analysis.direction, reason: analysis.reason, candleTime: analysis.candleTime }; } } catch { /* Raw candle remains available in the journal. */ }
-      const entrySnapshot = { ...captureMarketSnapshot({ ...stock, price: entryPrice, ...indicators }, startedAt), candle: { datetime: candle.datetime, open: Number(candle.open), high: Number(candle.high), low: Number(candle.low), close: entryPrice, volume: Number(candle.volume) || null } };
-      const trade = { id: crypto.randomUUID?.() || String(Date.now()), symbol: stock.symbol, name: stock.name, direction: stock.direction || 'UP', entryPrice, currentPrice: entryPrice, startedAt, endsAt: new Date(Date.now()+10*60*1000).toISOString(), status:'RUNNING', entrySnapshot };
+      const marketMode = stock.marketMode || (RED_INSTRUMENTS.some(item => item.symbol === stock.symbol) ? 'Red' : 'Blue');
+      const durationMins = marketMode === 'Green' ? 180 : 10;
+      const entrySnapshot = { ...captureMarketSnapshot({ ...stock, price: entryPrice, ...indicators, dataMode: stock.dataMode || 'Twelve Data · 1min' }, startedAt), marketMode, candle: { datetime: candle.datetime, open: Number(candle.open), high: Number(candle.high), low: Number(candle.low), close: entryPrice, volume: Number(candle.volume) || null } };
+      const trade = { id: crypto.randomUUID?.() || String(Date.now()), symbol: stock.symbol, name: stock.name, marketMode, durationMins, direction: stock.direction || 'UP', entryPrice, currentPrice: entryPrice, startedAt, endsAt: new Date(Date.now()+durationMins*60*1000).toISOString(), status:'RUNNING', entrySnapshot, lastMultiTimeframeAt:null, multiTimeframe:null };
       setBlueTrades(previous=>[trade,...previous]);
-      setNotice(`Started ${stock.symbol}: 10-minute simulated trade. It will be force-closed at expiry.`);
+      setNotice(`Started ${stock.symbol}: ${durationMins===180?'3-hour':'10-minute'} simulated ${marketMode} session. It will close at expiry unless an earlier exit signal fires.`);
     } catch (error) { setNotice(`Could not start ${stock.symbol}: ${error.message}`); }
   }
 
@@ -444,7 +516,7 @@ export default function App() {
       let indicators = {};
       try { if (candles.length >= 35) { const analysis = analyzeCandles(candles); indicators = { indicators: analysis.indicators, signalFeatures: analysis.signalFeatures, score: analysis.score, direction: analysis.direction, reason: analysis.reason, candleTime: analysis.candleTime }; } } catch { /* Raw exit candle remains available. */ }
       const exitSnapshot = { ...captureMarketSnapshot({ symbol: trade.symbol, price: exitPrice, ...indicators }, closedAt), candle: { datetime: candle.datetime, open: Number(candle.open), high: Number(candle.high), low: Number(candle.low), close: exitPrice, volume: Number(candle.volume) || null } };
-      const closed = { ...trade, currentPrice:exitPrice, exitPrice, exitTime:candle.datetime, closedAt, exitSnapshot, status: forced ? 'FORCED CLOSED' : (reason ? reason : 'CLOSED'), exitReason: reason || (forced ? '10-MINUTE TIME LIMIT' : 'MANUAL SALE'), pnlPct, result: pnlPct >= 0 ? 'WIN' : 'LOSS' };
+      const closed = { ...trade, currentPrice:exitPrice, exitPrice, exitTime:candle.datetime, closedAt, exitSnapshot:{...exitSnapshot,marketMode:trade.marketMode||'Blue',multiTimeframe:trade.multiTimeframe||null}, status: forced ? 'FORCED CLOSED' : (reason ? reason : 'CLOSED'), exitReason: reason || (forced ? `${trade.durationMins||10}-MINUTE TIME LIMIT` : 'MANUAL SALE'), pnlPct, result: pnlPct >= 0 ? 'WIN' : 'LOSS' };
       setBlueTrades(previous=>previous.map(t=>t.id===trade.id?closed:t));
       setNotice(`${trade.symbol} ${forced?'force-closed':(reason ? `AI sold (${reason})` : 'sold')}: ${pnlPct>=0?'+':''}${pnlPct.toFixed(3)}% simulated ${pnlPct>=0?'profit':'loss'}.`);
     } catch(error) { setNotice(`Exit for ${trade.symbol} not recorded: ${error.message}. Trade remains open for retry.`); }
@@ -476,18 +548,22 @@ export default function App() {
             const adverseMoves = lastThreeMoves.filter(move => move < 0).length;
             const reversal = adverseMoves >= 2 && Number(latest.close) !== Number(latest.open) &&
               (trade.direction === 'UP' ? Number(latest.close) < Number(latest.open) : Number(latest.close) > Number(latest.open));
-            let exitReason = '';
-            if (livePnl >= 0.35) exitReason = 'AI TAKE-PROFIT';
-            else if (livePnl <= -0.25) exitReason = 'AI RISK EXIT';
-            else if (reversal && livePnl > 0.02) exitReason = 'AI MOMENTUM REVERSAL';
-            setBlueTrades(previousTrades=>previousTrades.map(t=>t.id===trade.id&&!t.closedAt?{...t,currentPrice:price,lastCheckedAt:new Date().toISOString(),livePnlPct:livePnl,aiSignal:exitReason || 'MONITORING'}:t));
+            let exitReason = '', multiTimeframe = trade.multiTimeframe || null, lastMultiTimeframeAt = trade.lastMultiTimeframeAt || null;
+            if(trade.marketMode==='Green'&&(!lastMultiTimeframeAt||Date.now()-new Date(lastMultiTimeframeAt).getTime()>=5*60*1000)){
+              const signals={};
+              for(const interval of ['5min','15min','1h']){try{const tfResponse=await fetch(`/api/market-data?symbol=${encodeURIComponent(trade.symbol)}&interval=${interval}&outputsize=21`),tfPayload=await tfResponse.json();if(tfResponse.ok&&tfPayload.candles?.length>=2){const rows=[...tfPayload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))),a=Number(rows.at(-2).close),b=Number(rows.at(-1).close);signals[interval]=b>a?'UP':b<a?'DOWN':'FLAT';}}catch{/* Unavailable timeframe is omitted. */}}
+              multiTimeframe=signals;lastMultiTimeframeAt=new Date().toISOString();
+              if(Object.values(signals).filter(signal=>signal!=='FLAT'&&signal!==trade.direction).length>=2)exitReason='AI MULTI-TIMEFRAME REVERSAL';
+            }
+            if(!exitReason){if(trade.marketMode==='Green'&&livePnl>=1.2)exitReason='AI TAKE-PROFIT';else if(trade.marketMode==='Green'&&livePnl<=-0.8)exitReason='AI RISK EXIT';else if(trade.marketMode!=='Green'&&livePnl>=0.35)exitReason='AI TAKE-PROFIT';else if(trade.marketMode!=='Green'&&livePnl<=-0.25)exitReason='AI RISK EXIT';else if(reversal&&livePnl>0.02)exitReason='AI MOMENTUM REVERSAL';}
+            setBlueTrades(previousTrades=>previousTrades.map(t=>t.id===trade.id&&!t.closedAt?{...t,currentPrice:price,lastCheckedAt:new Date().toISOString(),livePnlPct:livePnl,aiSignal:exitReason||'MONITORING',multiTimeframe,lastMultiTimeframeAt}:t));
             if (exitReason) {
-              await closeBlueTrade({...trade,currentPrice:price,aiSignal:exitReason}, false, exitReason);
+              await closeBlueTrade({...trade,currentPrice:price,aiSignal:exitReason,multiTimeframe,lastMultiTimeframeAt}, false, exitReason);
             }
           }
         } catch { /* retain last verified mark */ }
       }
-    }, 15000);
+    }, blueTrades.some(t=>!t.closedAt&&t.marketMode==='Green')?60000:15000);
     return ()=>clearInterval(timer);
   }, [blueTrades]);
   useEffect(() => {
@@ -495,6 +571,12 @@ export default function App() {
     if (!blueStocks.length) refreshBlueStocks();
     const timer = setInterval(refreshBlueStocks, 5*60*1000);
     return ()=>clearInterval(timer);
+  }, [activeTab]);
+  useEffect(() => {
+    if(activeTab!=='Green Dashboard')return;
+    if(!greenStocks.length)refreshGreenStocks();
+    const timer=setInterval(refreshGreenStocks,5*60*1000);
+    return()=>clearInterval(timer);
   }, [activeTab]);
 
   // Lock the daily picks only after a verified market scan is available; never overwrite a saved day.
@@ -809,6 +891,7 @@ export default function App() {
       <button className={`nav-item blue-nav-item ${activeTab === 'Blue Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Blue Dashboard')}><Activity size={18}/>Blue</button>
       <button className={`nav-item red-nav-item ${activeTab === 'Red Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Red Dashboard')}><Activity size={18}/>Red</button>
       <button className={`nav-item red-review-nav-item ${activeTab === 'Red Review' ? 'active' : ''}`} onClick={() => setActiveTab('Red Review')}><BrainCircuit size={18}/>Review</button>
+      <button className={`nav-item green-nav-item ${activeTab === 'Green Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Green Dashboard')}><Activity size={18}/>Green</button>
       {nav.map(({ name, icon: Icon }) => <button key={name} className={`nav-item ${activeTab === name ? 'active' : ''}`} onClick={() => setActiveTab(name)}><Icon size={18} />{name}</button>)}
       <div className="sidebar-bottom"><div className="status-dot" /><span>Paper research mode</span><span className="version">v0.2</span></div>
     </aside>
@@ -841,8 +924,20 @@ export default function App() {
         <div className="table-wrap"><table><thead><tr><th>RANK</th><th>STOCK</th><th>LAST PRICE</th><th>5-MIN MOVE</th><th>SIGNAL SCORE</th><th>LAST CANDLE</th><th>ACTION</th></tr></thead><tbody>{blueStocks.map((stock,index)=><tr key={stock.symbol}><td>{String(index+1).padStart(2,'0')}</td><td><strong>{stock.symbol}</strong><small className="journal-stock-name">{stock.name}</small></td><td>{money(stock.price)}</td><td><span className={`change ${stock.change>=0?'up':'down'}`}>{signedPercent(stock.change)}</span></td><td><div className="score-cell"><div className="score-track"><span style={{width:`${stock.score}%`}}/></div><strong>{stock.score}</strong></div></td><td>{stock.candleTime?new Date(stock.candleTime.replace(' ','T')).toLocaleTimeString():'—'}</td><td><button className="small-button buy" disabled={blueTrades.some(t=>t.symbol===stock.symbol&&!t.closedAt)} onClick={()=>startBlueTrade(stock)}>{blueTrades.some(t=>t.symbol===stock.symbol&&!t.closedAt)?'Running':'Start'}</button></td></tr>)}</tbody></table></div>
         <div className="panel-heading blue-running-heading"><div><div className="eyebrow">10-MINUTE TRADE TRACKER</div><h3>Active & completed trades</h3></div><span className="count-pill">{blueTrades.length} total</span></div>
         {!blueTrades.length && <p className="subtle-label">No Blue trades yet. Start a stock above to begin tracking.</p>}
-        <div className="blue-trade-list">{[...blueTrades].map(trade=><div className="blue-trade-row" key={trade.id}><div><strong>{trade.symbol}</strong><small>{trade.status} · Entry {money(trade.entryPrice)}{!trade.closedAt && trade.aiSignal ? ` · ${trade.aiSignal}` : ''}</small></div><div><strong>{trade.closedAt?money(trade.exitPrice):money(trade.currentPrice)}</strong><small>{trade.closedAt?'Exit price':`P/L ${signedPercent((trade.currentPrice-trade.entryPrice)/trade.entryPrice*100)}`}</small></div><div>{trade.closedAt?<span className={trade.pnlPct>=0?'positive-text':'negative-text'}>{signedPercent(trade.pnlPct)} · {trade.result}</span>:<><strong>{Math.max(0,Math.ceil((new Date(trade.endsAt).getTime()-blueClock)/1000))}s</strong><small>to forced sale</small></>}</div><div>{!trade.closedAt&&<button className="small-button sell" onClick={()=>closeBlueTrade(trade,false)}>Sell now</button>}</div></div>)}</div>
+        <div className="blue-trade-list">{[...blueTrades].map(trade=><div className="blue-trade-row" key={trade.id}><div><strong>{trade.symbol}</strong><small>{trade.status} · Entry {money(trade.entryPrice)}{!trade.closedAt && trade.aiSignal ? ` · ${trade.aiSignal}` : ''}</small></div><div><strong>{trade.closedAt?money(trade.exitPrice):money(trade.currentPrice)}</strong><small>{trade.closedAt?'Exit price':`P/L ${signedPercent((trade.direction==='DOWN'?-1:1)*(trade.currentPrice-trade.entryPrice)/trade.entryPrice*100)}`}</small></div><div>{trade.closedAt?<span className={trade.pnlPct>=0?'positive-text':'negative-text'}>{signedPercent(trade.pnlPct)} · {trade.result}</span>:<><strong>{formatRemaining(new Date(trade.endsAt).getTime()-blueClock)}</strong><small>to forced sale</small></>}</div><div>{!trade.closedAt&&<button className="small-button sell" onClick={()=>closeBlueTrade(trade,false)}>Sell now</button>}</div></div>)}</div>
         <p className="blue-disclaimer">Paper trading only — no real orders are placed. Five-minute candles update on the provider's cadence, and quotes may be delayed. Results are a research score, not a promise of profit. Active timers run while this dashboard is open.</p>
+      </section>}
+      {activeTab === 'Green Dashboard' && <section className="panel green-dashboard">
+        <div className="panel-heading"><div><div className="eyebrow">GREEN · THREE-HOUR MIXED-MARKET PAPER TEST</div><h3>20 stocks, crypto & forex options <span className="count-pill">{greenStocks.length}/20</span></h3><p className="green-intro">Ranked from verified 15-minute candles for a three-hour horizon. The monitor checks 1-minute prices plus 5-minute, 15-minute and 1-hour trend alignment. Sessions close after three hours unless an earlier risk or reversal signal fires.</p></div><button className="primary-button" onClick={refreshGreenStocks} disabled={greenBusy}><RotateCcw size={15}/>{greenBusy?'Refreshing…':'Refresh Green options'}</button></div>
+        <div className="green-summary"><div><span>Stocks</span><strong>10</strong></div><div><span>Crypto</span><strong>5</strong></div><div><span>Forex pairs</span><strong>5</strong></div><div><span>Duration</span><strong>3 hours</strong></div></div>
+        {!greenStocks.length&&<div className="empty-state"><strong>No verified Green prices yet</strong><p>Refresh to load market candles. Unsupported symbols are skipped instead of replaced with invented prices.</p></div>}
+        <div className="green-instrument-grid">{greenStocks.map((instrument,index)=>{const running=blueTrades.some(t=>t.symbol===instrument.symbol&&!t.closedAt);return <article className="green-instrument-card" key={instrument.symbol}><div className="green-instrument-top"><span className="red-rank">{String(index+1).padStart(2,'0')}</span><span className={`green-type ${instrument.type.toLowerCase()}`}>{instrument.type}</span></div><strong>{instrument.symbol}</strong><span className="green-instrument-name">{instrument.name}</span><div className="green-price-line"><b>{Number.isFinite(instrument.price)?money(instrument.price):'Unavailable'}</b><span className={instrument.change==null?'':instrument.change>=0?'positive-text':'negative-text'}>{instrument.change==null?'No verified quote':signedPercent(instrument.change)+' / 15m'}</span></div><div className="score-cell"><div className="score-track"><span style={{width:`${instrument.score}%`}}/></div><strong>{instrument.score}</strong></div><small className="green-research-note">{instrument.candleTime?new Date(instrument.candleTime.replace(' ','T')).toLocaleString():'No candle time'}</small><button className="small-button buy green-start-button" disabled={running||greenBusy||!Number.isFinite(instrument.price)} onClick={()=>startBlueTrade({...instrument,marketMode:'Green'})}>{running?'Running':'Start 3-hour test'}</button></article>;})}</div>
+        <div className="panel-heading green-running-heading"><div><div className="eyebrow">GREEN · THREE-HOUR TRACKER</div><h3>Active & completed Green sessions</h3></div><span className="count-pill">{blueTrades.filter(t=>t.marketMode==='Green').length} total</span></div>
+        {!blueTrades.some(t=>t.marketMode==='Green')&&<p className="subtle-label">No Green sessions yet. Start an option above to begin a simulated test.</p>}
+        <div className="blue-trade-list">{blueTrades.filter(t=>t.marketMode==='Green').map(trade=><div className="blue-trade-row" key={trade.id}><div><strong>{trade.symbol}</strong><small>{trade.status} · {trade.direction} · Entry {money(trade.entryPrice)}{!trade.closedAt&&trade.aiSignal?` · ${trade.aiSignal}`:''}</small></div><div><strong>{money(trade.closedAt?trade.exitPrice:trade.currentPrice)}</strong><small>{trade.closedAt?'Exit price':`P/L ${signedPercent((trade.currentPrice-trade.entryPrice)/trade.entryPrice*100)}`}</small></div><div>{trade.closedAt?<span className={trade.pnlPct>=0?'positive-text':'negative-text'}>{signedPercent(trade.pnlPct)} · {trade.result}</span>:<><strong>{formatRemaining(new Date(trade.endsAt).getTime()-blueClock)}</strong><small>to forced close</small>{trade.multiTimeframe&&<small>MTF: {Object.entries(trade.multiTimeframe).map(([tf,dir])=>`${tf} ${dir}`).join(' · ')}</small>}</>}</div><div>{!trade.closedAt&&<button className="small-button sell" onClick={()=>closeBlueTrade(trade,false)}>Close now</button>}</div></div>)}</div>
+        <div className="panel-heading green-running-heading"><div><div className="eyebrow">GREEN · REVIEW & LEARNING</div><h3>Three-hour pattern review</h3><p className="green-intro">Review completed 15-minute candle outcomes and Green session results. Findings save locally and to Supabase when signed in.</p></div><button className="primary-button" onClick={reviewGreenPatterns} disabled={greenReviewBusy}><BrainCircuit size={15}/>{greenReviewBusy?'Reviewing 20 markets…':'Review Green'}</button></div>
+        {greenReview&&<><div className="green-summary"><div><span>Markets reviewed</span><strong>{greenReview.instrumentsReviewed}/20</strong></div><div><span>Candle outcomes</span><strong>{greenReview.observations}</strong></div><div><span>Completed sessions</span><strong>{greenReview.closedSessions}</strong></div><div><span>Research score</span><strong>{greenReview.optimizationScore}%</strong></div></div><div className="empty-state learning-journal-summary"><strong>Green learning summary</strong><p>{greenReview.summary}</p><p>Last review: {new Date(greenReview.reviewedAt).toLocaleString()} · {greenReview.source}</p></div><div className="table-wrap"><table><thead><tr><th>OBSERVED CONDITION</th><th>SAMPLES</th><th>NEXT CANDLE UP</th><th>DIRECTIONAL ACCURACY</th><th>AVERAGE NEXT MOVE</th></tr></thead><tbody>{greenReview.patterns.map(pattern=><tr key={pattern.name}><td><strong>{pattern.name}</strong></td><td>{pattern.samples}</td><td>{pattern.upRate==null?'—':pattern.upRate.toFixed(1)+'%'}</td><td>{pattern.directionalAccuracy==null?'—':pattern.directionalAccuracy.toFixed(1)+'%'}</td><td className={pattern.avgNextMove>=0?'positive-text':'negative-text'}>{signedPercent(pattern.avgNextMove)}</td></tr>)}</tbody></table></div>{greenReview.unavailable.length>0&&<p className="snapshot-note">Unavailable ({greenReview.unavailable.length}): {greenReview.unavailable.map(item=>item.symbol).join(', ')}.</p>}</>}
+        <p className="green-disclaimer">Paper trading only — no real orders are placed. Green uses rule-based early exits and multi-timeframe trend checks; results are not guaranteed. The browser must remain open and connected for monitoring.</p>
       </section>}
       {activeTab === 'Red Dashboard' && <section className="panel red-dashboard">
         <div className="panel-heading"><div><div className="eyebrow">RED · CRYPTO & FOREX RESEARCH</div><h3>30 market instruments <span className="count-pill">{RED_INSTRUMENTS.length}/30</span></h3><p className="red-intro">A focused watchlist for cryptocurrency and foreign-exchange markets. Use this page to compare instruments and research market conditions.</p></div></div>
@@ -852,7 +947,7 @@ export default function App() {
           return <article className="red-instrument-card" key={instrument.symbol}><div className="red-instrument-top"><span className="red-rank">{String(index + 1).padStart(2, '0')}</span><span className={`red-type ${instrument.type === 'Crypto' ? 'crypto' : 'forex'}`}>{instrument.type}</span></div><strong>{instrument.symbol}</strong><span className="red-instrument-name">{instrument.name}</span><span className="red-research-note">5-min market watch · 10-min paper session</span><button className="small-button buy red-start-button" disabled={running || blueBusy} onClick={() => startBlueTrade({ symbol: instrument.symbol, name: instrument.name, direction: 'UP' })}>{running ? 'Running' : 'Start'}</button></article>;
         })}</div>
         {blueTrades.some(t => RED_INSTRUMENTS.some(instrument => instrument.symbol === t.symbol)) && <div className="panel-heading blue-running-heading"><div><div className="eyebrow">RED · 10-MINUTE TRACKER</div><h3>Active & completed Red sessions</h3></div><span className="count-pill">{blueTrades.filter(t => RED_INSTRUMENTS.some(instrument => instrument.symbol === t.symbol)).length} total</span></div>}
-        <div className="blue-trade-list">{blueTrades.filter(t => RED_INSTRUMENTS.some(instrument => instrument.symbol === t.symbol)).map(trade => <div className="blue-trade-row" key={trade.id}><div><strong>{trade.symbol}</strong><small>{trade.status} · Entry {money(trade.entryPrice)}{!trade.closedAt && trade.aiSignal ? ` · ${trade.aiSignal}` : ''}</small></div><div><strong>{trade.closedAt ? money(trade.exitPrice) : money(trade.currentPrice)}</strong><small>{trade.closedAt ? 'Exit price' : `P/L ${signedPercent((trade.currentPrice-trade.entryPrice)/trade.entryPrice*100)}`}</small></div><div>{trade.closedAt ? <span className={trade.pnlPct >= 0 ? 'positive-text' : 'negative-text'}>{signedPercent(trade.pnlPct)} · {trade.result}</span> : <><strong>{Math.max(0,Math.ceil((new Date(trade.endsAt).getTime()-blueClock)/1000))}s</strong><small>to forced sale</small></>}</div><div>{!trade.closedAt && <button className="small-button sell" onClick={() => closeBlueTrade(trade,false)}>Sell now</button>}</div></div>)}</div>
+        <div className="blue-trade-list">{blueTrades.filter(t => RED_INSTRUMENTS.some(instrument => instrument.symbol === t.symbol)).map(trade => <div className="blue-trade-row" key={trade.id}><div><strong>{trade.symbol}</strong><small>{trade.status} · Entry {money(trade.entryPrice)}{!trade.closedAt && trade.aiSignal ? ` · ${trade.aiSignal}` : ''}</small></div><div><strong>{trade.closedAt ? money(trade.exitPrice) : money(trade.currentPrice)}</strong><small>{trade.closedAt ? 'Exit price' : `P/L ${signedPercent((trade.currentPrice-trade.entryPrice)/trade.entryPrice*100)}`}</small></div><div>{trade.closedAt ? <span className={trade.pnlPct >= 0 ? 'positive-text' : 'negative-text'}>{signedPercent(trade.pnlPct)} · {trade.result}</span> : <><strong>{formatRemaining(new Date(trade.endsAt).getTime()-blueClock)}</strong><small>to forced sale</small></>}</div><div>{!trade.closedAt && <button className="small-button sell" onClick={() => closeBlueTrade(trade,false)}>Sell now</button>}</div></div>)}</div>
         <p className="red-disclaimer">Research and paper-monitoring view only. Live quotes, provider symbol compatibility, and AI-generated signals are not yet connected here. No orders are placed and no profit is guaranteed.</p>
       </section>}
       {activeTab === 'Red Review' && <section className="panel red-dashboard">
