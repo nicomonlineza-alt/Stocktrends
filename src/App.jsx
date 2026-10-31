@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { supabase } from './lib/supabase.js';
 import { analyzeCandles, learnIndicatorWeights, exitReason } from './strategy.js';
 import {
   Activity, ArrowDownRight, ArrowUpRight, BarChart3, BrainCircuit, CircleHelp,
@@ -63,6 +64,8 @@ const rankCandidates = (source = CANDIDATES) => source.map(stock => ({
   ...stock,
   score: Number.isFinite(stock.score) ? stock.score : Math.round(stock.momentum * 0.35 + stock.relativeStrength * 0.30 + stock.volume * 0.20 + (100 - stock.volatility) * 0.15),
 })).sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
+const journalEventKey = item => [item?.id || 'event', item?.mode || 'unknown', item?.event || 'unknown', item?.time || 'unknown'].join('|');
+
 const captureMarketSnapshot = (stock, capturedAt = new Date().toISOString()) => ({
   capturedAt, symbol: stock?.symbol || null,
   price: Number.isFinite(Number(stock?.price)) ? Number(stock.price) : null,
@@ -123,7 +126,106 @@ export default function App() {
   const [redReview, setRedReview] = useState(() => readStore('stocktrends-red-review-v1', null));
   const [redReviewBusy, setRedReviewBusy] = useState(false);
   const [learningJournal, setLearningJournal] = useState(() => readStore('stocktrends-learning-journal-v1', []));
+  const [cloudEmail, setCloudEmail] = useState('');
+  const [cloudUser, setCloudUser] = useState(null);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState('Cloud journal not connected');
 
+
+  useEffect(() => {
+    if (!supabase) {
+      setCloudStatus('Add the Supabase Vercel environment variables to enable cloud sync.');
+      return;
+    }
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) setCloudStatus(`Sign-in check failed: ${error.message}`);
+      setCloudUser(data?.session?.user || null);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCloudUser(session?.user || null);
+      if (!session?.user) {
+        setCloudReady(false);
+        setCloudStatus('Signed out · journal remains saved on this device');
+      }
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCloudJournal() {
+      if (!supabase || !cloudUser?.id) {
+        setCloudReady(false);
+        return;
+      }
+      setCloudReady(false);
+      setCloudStatus('Loading cloud journal…');
+      const { data, error } = await supabase
+        .from('learning_journal_events')
+        .select('*')
+        .eq('user_id', cloudUser.id)
+        .order('occurred_at', { ascending: false })
+        .limit(5000);
+      if (cancelled) return;
+      if (error) {
+        setCloudStatus(`Cloud read failed: ${error.message}`);
+        return;
+      }
+      const cloudItems = (data || []).map(row => ({
+        ...(row.source_payload || {}),
+        id: row.source_payload?.id || row.event_key,
+        time: row.occurred_at,
+        symbol: row.symbol,
+        mode: row.mode,
+        event: row.event_type,
+        price: row.price,
+        pnl: row.pnl,
+        outcome: row.outcome,
+        reason: row.reason,
+        entrySnapshot: row.entry_snapshot,
+        exitSnapshot: row.exit_snapshot,
+        legacy: row.legacy
+      }));
+      setLearningJournal(previous => {
+        const merged = new Map();
+        for (const item of cloudItems) merged.set(journalEventKey(item), item);
+        for (const item of previous) merged.set(journalEventKey(item), item);
+        return [...merged.values()].filter(item => item.time).sort((a,b) => String(b.time).localeCompare(String(a.time)));
+      });
+      setCloudReady(true);
+      setCloudStatus(`Connected · loaded ${cloudItems.length} cloud journal events`);
+    }
+    loadCloudJournal();
+    return () => { cancelled = true; };
+  }, [cloudUser?.id]);
+
+  useEffect(() => {
+    if (!supabase || !cloudUser?.id || !cloudReady || !learningJournal.length) return;
+    const rows = learningJournal.filter(item => item.time && item.symbol && item.mode && item.event).map(item => ({
+      user_id: cloudUser.id,
+      event_key: journalEventKey(item),
+      occurred_at: item.time,
+      symbol: item.symbol,
+      mode: item.mode,
+      event_type: item.event,
+      price: Number.isFinite(Number(item.price)) ? Number(item.price) : null,
+      pnl: Number.isFinite(Number(item.pnl)) ? Number(item.pnl) : null,
+      outcome: item.outcome || null,
+      reason: item.reason || null,
+      entry_snapshot: item.entrySnapshot || null,
+      exit_snapshot: item.exitSnapshot || null,
+      legacy: Boolean(item.legacy),
+      source_payload: item,
+      updated_at: new Date().toISOString()
+    }));
+    if (!rows.length) return;
+    supabase.from('learning_journal_events').upsert(rows, { onConflict: 'user_id,event_key' })
+      .then(({ error }) => {
+        if (error) setCloudStatus(`Cloud save failed: ${error.message}`);
+        else setCloudStatus(`Cloud sync active · ${rows.length} journal events`);
+      });
+  }, [cloudUser?.id, cloudReady, learningJournal]);
 
   useEffect(() => { localStorage.setItem(STORE.cash, JSON.stringify(cash)); }, [cash]);
   useEffect(() => { localStorage.setItem(STORE.positions, JSON.stringify(positions)); }, [positions]);
@@ -716,6 +818,19 @@ export default function App() {
 
       <div className="notice-bar"><ShieldCheck size={17} /><span><strong>Paper trading only.</strong> Maximum {MAX_CONCURRENT_POSITIONS} concurrent holdings. A scan checks EMA 9/21, RSI, MACD, ATR and volume, then records simulated exits/entries. Scans run only when triggered while this app is open; there is no background trading. If Twelve Data is not configured, sample values remain clearly labelled.</span></div>
       {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notification"><X size={16} /></button></div>}
+
+      <section className="panel cloud-panel">
+        <div className="panel-heading">
+          <div><div className="eyebrow">CLOUD LEARNING JOURNAL</div><h3>{cloudUser ? 'Supabase connected' : 'Sync across devices'}</h3><p className="subtle-label">{cloudStatus}</p></div>
+          {cloudUser && <button className="secondary-button" onClick={async () => { setCloudBusy(true); const { error } = await supabase.auth.signOut(); setCloudBusy(false); if (error) setCloudStatus(error.message); else setCloudStatus('Signed out · local journal preserved'); }}>Sign out</button>}
+        </div>
+        {!supabase ? <p>Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_PUBLISHABLE_KEY</code> to Vercel to enable this connection.</p> :
+          cloudUser ? <p>Signed in as <strong>{cloudUser.email || 'your account'}</strong>. Journal entries sync to your private cloud account; your local copy is retained too.</p> :
+          <form className="cloud-auth-form" onSubmit={async event => { event.preventDefault(); if (!cloudEmail.trim()) return; setCloudBusy(true); setCloudStatus('Sending secure sign-in link…'); const { error } = await supabase.auth.signInWithOtp({ email: cloudEmail.trim(), options: { emailRedirectTo: window.location.origin } }); setCloudBusy(false); setCloudStatus(error ? `Sign-in failed: ${error.message}` : 'Check your email for the secure sign-in link, then return to this app.'); }}>
+            <label htmlFor="cloud-email">Email address</label><input id="cloud-email" type="email" autoComplete="email" value={cloudEmail} onChange={event => setCloudEmail(event.target.value)} placeholder="you@example.com" required />
+            <button className="primary-button" type="submit" disabled={cloudBusy}>{cloudBusy ? 'Please wait…' : 'Email me a sign-in link'}</button>
+          </form>}
+      </section>
 
       <section className="welcome-row"><div><div className="eyebrow">DAILY RESEARCH BRIEFING · {todayKey()}</div><h2>Five picks. <span>R100 on the line.</span></h2><p>Scan the market, compare indicator patterns, and let the paper trader test rule-based entries and exits. No real orders are placed.</p><div className="eyebrow market-status-line">{marketStatus}{scanning ? ` · ${scanProgress.done}/${scanProgress.total}` : ''}</div>{learnedWeights.learned && <small className="subtle-label">Adaptive weights trained on {learnedWeights.sampleSize} closed paper trades</small>}</div><div className="welcome-actions"><button className="primary-button" onClick={scanMarket} disabled={scanning}><Activity size={15} /> {scanning ? `Scanning ${scanProgress.done}/${scanProgress.total}` : 'Scan market & paper trade'}</button><button className="secondary-button" onClick={exportData}><ExternalLink size={15} /> Export data</button><button className="secondary-button" onClick={closeDailySession} disabled={dailyJournal.some(entry => entry.id === todayKey())}><BookOpen size={16} /> {dailyJournal.some(entry => entry.id === todayKey()) ? 'Today saved' : 'Close day & journal'}</button></div></section>
 
