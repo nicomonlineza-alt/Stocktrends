@@ -133,43 +133,56 @@ export default function App() {
     const observations = [];
     const unavailable = [];
     try {
-      // Review historical five-minute candles; no trades or orders are created.
+      // Review only completed candles, so the next candle is the out-of-sample outcome.
       for (const instrument of RED_INSTRUMENTS) {
         try {
-          const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(instrument.symbol)}&interval=5min&outputsize=30`);
+          const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(instrument.symbol)}&interval=5min&outputsize=100`);
           const payload = await response.json();
           if (!response.ok || !payload.candles?.length) {
             unavailable.push({ symbol: instrument.symbol, reason: payload.error || 'No verified candles' });
             continue;
           }
           const candles = [...payload.candles].sort((a,b) => String(a.datetime).localeCompare(String(b.datetime)));
-          for (let i = 20; i < candles.length - 1; i++) {
+          for (let i = 21; i < candles.length - 1; i++) {
             const window = candles.slice(i - 19, i + 1);
             const current = candles[i], next = candles[i + 1], prior = candles[i - 1];
-            const closes = window.map(c => c.close);
+            const closes = window.map(c => Number(c.close));
             const mean = closes.reduce((sum,v) => sum + v, 0) / closes.length;
             const sd = Math.sqrt(closes.reduce((sum,v) => sum + (v - mean) ** 2, 0) / closes.length);
             const lower = mean - 2 * sd, upper = mean + 2 * sd;
             const gains = [], losses = [];
             for (let j = Math.max(1, i - 13); j <= i; j++) {
-              const delta = candles[j].close - candles[j - 1].close;
+              const delta = Number(candles[j].close) - Number(candles[j - 1].close);
               if (delta >= 0) gains.push(delta); else losses.push(-delta);
             }
-            const avgGain = gains.length ? gains.reduce((a,b)=>a+b,0) / 14 : 0;
-            const avgLoss = losses.length ? losses.reduce((a,b)=>a+b,0) / 14 : 0;
+            const avgGain = gains.reduce((a,b)=>a+b,0) / 14;
+            const avgLoss = losses.reduce((a,b)=>a+b,0) / 14;
             const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
-            const nextPct = current.close ? (next.close - current.close) / current.close * 100 : 0;
+            const ema = (values, period) => {
+              const k = 2 / (period + 1); let value = values[0];
+              for (let n = 1; n < values.length; n++) value = values[n] * k + value * (1-k);
+              return value;
+            };
+            const recent = closes.slice(-26);
+            const ema9 = ema(recent.slice(-9), 9), ema21 = ema(recent.slice(-21), 21);
+            const ema12 = ema(recent.slice(-12), 12), ema26 = ema(recent, 26);
+            const macd = ema12 - ema26;
+            const body = Math.abs(Number(current.close)-Number(current.open));
+            const range = Math.max(0.00000001, Number(current.high)-Number(current.low));
+            const nextPct = Number(current.close) ? (Number(next.close)-Number(current.close))/Number(current.close)*100 : 0;
             observations.push({
-              symbol: instrument.symbol, type: instrument.type, time: current.datetime,
-              nextUp: nextPct > 0, nextPct,
-              bullishCandle: current.close > current.open,
-              bearishCandle: current.close < current.open,
-              momentumUp: current.close > prior.close,
-              momentumDown: current.close < prior.close,
-              nearLowerBand: sd > 0 && current.close <= lower + sd * 0.35,
-              nearUpperBand: sd > 0 && current.close >= upper - sd * 0.35,
+              symbol: instrument.symbol, type: instrument.type, time: current.datetime, nextUp: nextPct > 0, nextPct,
+              bullishCandle: Number(current.close) > Number(current.open),
+              bearishCandle: Number(current.close) < Number(current.open),
+              momentumUp: Number(current.close) > Number(prior.close),
+              momentumDown: Number(current.close) < Number(prior.close),
+              nearLowerBand: sd > 0 && Number(current.close) <= lower + sd * 0.35,
+              nearUpperBand: sd > 0 && Number(current.close) >= upper - sd * 0.35,
               rsiLow: rsi < 40, rsiHigh: rsi > 60,
-              volatility: current.close ? (current.high - current.low) / current.close * 100 : 0
+              emaBullish: ema9 > ema21, emaBearish: ema9 < ema21,
+              macdBullish: macd > 0, macdBearish: macd < 0,
+              strongBody: body / range > 0.65,
+              volatility: Number(current.close) ? range / Number(current.close) * 100 : 0
             });
           }
         } catch {
@@ -177,31 +190,43 @@ export default function App() {
         }
       }
       const rules = [
-        ['Bullish candle', o => o.bullishCandle],
-        ['Bearish candle', o => o.bearishCandle],
-        ['Upward momentum', o => o.momentumUp],
-        ['Downward momentum', o => o.momentumDown],
-        ['Near lower Bollinger Band', o => o.nearLowerBand],
-        ['Near upper Bollinger Band', o => o.nearUpperBand],
-        ['RSI below 40', o => o.rsiLow],
-        ['RSI above 60', o => o.rsiHigh]
+        ['Bullish candle', o => o.bullishCandle], ['Bearish candle', o => o.bearishCandle],
+        ['Upward momentum', o => o.momentumUp], ['Downward momentum', o => o.momentumDown],
+        ['Near lower Bollinger Band', o => o.nearLowerBand], ['Near upper Bollinger Band', o => o.nearUpperBand],
+        ['RSI below 40', o => o.rsiLow], ['RSI above 60', o => o.rsiHigh],
+        ['EMA9 above EMA21', o => o.emaBullish], ['EMA9 below EMA21', o => o.emaBearish],
+        ['MACD positive', o => o.macdBullish], ['MACD negative', o => o.macdBearish],
+        ['Strong candle body', o => o.strongBody]
       ];
       const patterns = rules.map(([name, test]) => {
         const rows = observations.filter(test);
         const ups = rows.filter(o => o.nextUp).length;
         const avgNextMove = rows.length ? rows.reduce((sum,o)=>sum+o.nextPct,0) / rows.length : 0;
-        return { name, samples: rows.length, upRate: rows.length ? ups / rows.length * 100 : null, avgNextMove };
-      }).filter(p => p.samples > 0).sort((a,b) => (b.upRate ?? 0) - (a.upRate ?? 0));
+        const downRate = rows.length ? 100 - ups / rows.length * 100 : null;
+        return { name, samples: rows.length, upRate: rows.length ? ups / rows.length * 100 : null, downRate, avgNextMove,
+          directionalAccuracy: rows.length ? Math.max(ups, rows.length-ups) / rows.length * 100 : null };
+      }).filter(p => p.samples > 0).sort((a,b) => (b.directionalAccuracy ?? 0) - (a.directionalAccuracy ?? 0));
+      const closedSessions = blueTrades.filter(t => t.closedAt && Number.isFinite(Number(t.pnlPct)));
+      const wins = closedSessions.filter(t => Number(t.pnlPct) > 0).length;
+      const winRate = closedSessions.length ? wins / closedSessions.length * 100 : null;
+      const bestPatterns = patterns.filter(p => p.samples >= 20 && p.directionalAccuracy >= 55).slice(0,3);
+      const weakestPatterns = patterns.filter(p => p.samples >= 20 && p.directionalAccuracy < 50).slice(0,2);
+      // This is a transparent research-readiness score, not a claim that a strategy is profitable.
+      const coverage = RED_INSTRUMENTS.length ? (RED_INSTRUMENTS.length - unavailable.length) / RED_INSTRUMENTS.length : 0;
+      const sampleScore = Math.min(1, observations.length / 500);
+      const breadthScore = Math.min(1, patterns.filter(p => p.samples >= 20).length / 8);
+      const optimizationScore = Math.round(100 * (coverage * 0.4 + sampleScore * 0.35 + breadthScore * 0.25));
       const result = {
-        reviewedAt: new Date().toISOString(),
-        source: 'Twelve Data 5-minute candles',
-        instrumentsReviewed: RED_INSTRUMENTS.length - unavailable.length,
-        observations: observations.length,
-        unavailable,
-        patterns
+        reviewedAt: new Date().toISOString(), source: 'Twelve Data completed 5-minute candles',
+        instrumentsReviewed: RED_INSTRUMENTS.length - unavailable.length, observations: observations.length,
+        unavailable, patterns, closedSessions: closedSessions.length, winRate,
+        optimizationScore, bestPatterns, weakestPatterns,
+        summary: observations.length
+          ? `Reviewed ${observations.length} candle outcomes across ${RED_INSTRUMENTS.length - unavailable.length} available instruments. ${bestPatterns.length ? 'Most promising historical conditions: ' + bestPatterns.map(p => p.name).join(', ') + '.' : 'No pattern yet has enough observations and directional separation to stand out.'} ${closedSessions.length ? `The completed paper sessions show a ${winRate.toFixed(1)}% win rate across ${closedSessions.length} sessions.` : 'There are not yet enough completed Blue/Red paper sessions to measure a trade win rate.'}`
+          : 'No usable candle observations were returned. Check market-data access and try again.'
       };
       setRedReview(result);
-      setNotice(`Review complete: ${result.instrumentsReviewed}/${RED_INSTRUMENTS.length} instruments and ${observations.length} candle observations analyzed.`);
+      setNotice(`Review complete: ${result.instrumentsReviewed}/${RED_INSTRUMENTS.length} instruments, ${observations.length} candle outcomes. Research optimisation score: ${optimizationScore}%.`);
     } finally {
       setRedReviewBusy(false);
     }
@@ -653,9 +678,11 @@ export default function App() {
         <div className="panel-heading"><div><div className="eyebrow">RED · PATTERN REVIEW</div><h3>Market pattern findings</h3><p className="red-intro">Compare recent five-minute candle conditions with the direction of the next candle. Findings are correlations, not proof of cause or reliable predictions.</p></div><button className="primary-button" onClick={reviewRedPatterns} disabled={redReviewBusy}><RotateCcw size={15}/>{redReviewBusy ? 'Reviewing markets…' : 'Review patterns'}</button></div>
         {!redReview && <div className="empty-state"><div className="empty-icon"><BrainCircuit size={22}/></div><strong>No review run yet</strong><p>Press Review patterns to examine available crypto and forex candles. Instruments without verified provider data will be listed as unavailable.</p></div>}
         {redReview && <><div className="red-summary"><div><span>Instruments reviewed</span><strong>{redReview.instrumentsReviewed}/30</strong></div><div><span>Candle observations</span><strong>{redReview.observations}</strong></div><div><span>Patterns checked</span><strong>{redReview.patterns.length}</strong></div><div><span>Last review</span><strong>{new Date(redReview.reviewedAt).toLocaleTimeString()}</strong></div></div>
-          <div className="table-wrap"><table><thead><tr><th>OBSERVED CONDITION</th><th>SAMPLES</th><th>NEXT CANDLE UP</th><th>AVERAGE NEXT MOVE</th><th>INTERPRETATION</th></tr></thead><tbody>{redReview.patterns.map(pattern => <tr key={pattern.name}><td><strong>{pattern.name}</strong></td><td>{pattern.samples}</td><td>{pattern.upRate === null ? '—' : pattern.upRate.toFixed(1) + '%'}</td><td className={pattern.avgNextMove >= 0 ? 'positive-text' : 'negative-text'}>{signedPercent(pattern.avgNextMove)}</td><td>{pattern.samples < 20 ? 'Too few samples to judge' : pattern.upRate >= 55 ? 'More upward outcomes in this sample' : pattern.upRate <= 45 ? 'More downward outcomes in this sample' : 'Mixed / no clear direction'}</td></tr>)}</tbody></table></div>
+          <div className="red-summary"><div><span>Research optimisation</span><strong>{redReview.optimizationScore ?? 0}% / 100%</strong></div><div><span>Completed paper sessions</span><strong>{redReview.closedSessions ?? 0}</strong></div><div><span>Paper-session win rate</span><strong>{redReview.winRate == null ? 'Not enough data' : redReview.winRate.toFixed(1) + '%'}</strong></div><div><span>Pattern sample coverage</span><strong>{redReview.patterns.filter(p=>p.samples>=20).length} qualified</strong></div></div>
+          <div className="empty-state"><strong>What the system learnt</strong><p>{redReview.summary}</p><p><b>Next optimisation:</b> collect more closed paper sessions and compare candidate patterns against a simple baseline on unseen candles before changing entry/exit rules.</p></div>
+          <div className="table-wrap"><table><thead><tr><th>OBSERVED CONDITION</th><th>SAMPLES</th><th>NEXT CANDLE UP</th><th>DIRECTIONAL ACCURACY</th><th>AVERAGE NEXT MOVE</th></tr></thead><tbody>{redReview.patterns.map(pattern => <tr key={pattern.name}><td><strong>{pattern.name}</strong></td><td>{pattern.samples}</td><td>{pattern.upRate === null ? '—' : pattern.upRate.toFixed(1) + '%'}</td><td>{pattern.directionalAccuracy == null ? '—' : pattern.directionalAccuracy.toFixed(1) + '%'}</td><td className={pattern.avgNextMove >= 0 ? 'positive-text' : 'negative-text'}>{signedPercent(pattern.avgNextMove)}</td></tr>)}</tbody></table></div>
           {redReview.unavailable.length > 0 && <p className="snapshot-note">Unavailable ({redReview.unavailable.length}): {redReview.unavailable.map(item=>item.symbol).join(', ')}. Check provider symbol support, API credits, and the API key.</p>}
-          <p className="red-disclaimer">Historical sample only. Patterns are descriptive correlations, not proven causes or guaranteed signals. This review does not place trades. Review time: {new Date(redReview.reviewedAt).toLocaleString()}.</p>
+          <p className="red-disclaimer">Historical paper-research only. The optimisation score measures data coverage and analysis breadth, not a probability of profit. Patterns are correlations, can overfit, and must be validated on unseen data before being used to change trading rules. No orders are placed and no profit is guaranteed. Review time: {new Date(redReview.reviewedAt).toLocaleString()}.</p>
         </>}
       </section>}
       {activeTab === 'Overview' && <section className="hour-pick-card">
