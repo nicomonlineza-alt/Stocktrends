@@ -441,7 +441,7 @@ export default function App() {
       for(const instrument of GREEN_INSTRUMENTS){
         try{
           const response=await fetch(`/api/market-data?symbol=${encodeURIComponent(instrument.symbol)}&interval=15min&outputsize=60`),payload=await response.json();
-          if(!response.ok||!payload.candles?.length)continue;
+          if(!response.ok||!payload.candles?.length){updated.push({...instrument,unavailable:true,reason:payload.error||'No verified market data available',score:0,price:null,change:null,candleTime:null});continue;}
           const candles=[...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))),latest=candles.at(-1),previous=candles.at(-2),first=candles.at(-Math.min(5,candles.length));
           const change=previous?.close?(Number(latest.close)-Number(previous.close))/Number(previous.close)*100:0,horizon=first?.close?(Number(latest.close)-Number(first.close))/Number(first.close)*100:change;
           const score=Math.round(Math.max(1,Math.min(99,50+horizon*9+(change>=0?5:-5))));
