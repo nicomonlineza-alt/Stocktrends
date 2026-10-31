@@ -63,6 +63,18 @@ const rankCandidates = (source = CANDIDATES) => source.map(stock => ({
   ...stock,
   score: Number.isFinite(stock.score) ? stock.score : Math.round(stock.momentum * 0.35 + stock.relativeStrength * 0.30 + stock.volume * 0.20 + (100 - stock.volatility) * 0.15),
 })).sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
+const captureMarketSnapshot = (stock, capturedAt = new Date().toISOString()) => ({
+  capturedAt, symbol: stock?.symbol || null,
+  price: Number.isFinite(Number(stock?.price)) ? Number(stock.price) : null,
+  candleTime: stock?.candleTime || null, dataMode: stock?.dataMode || 'market-snapshot',
+  direction: stock?.direction || stock?.action || null,
+  score: Number.isFinite(Number(stock?.score)) ? Number(stock.score) : null,
+  reason: stock?.reason || null,
+  indicators: stock?.indicators ? { ...stock.indicators } : null,
+  signalFeatures: stock?.signalFeatures ? { ...stock.signalFeatures } : null,
+  stopLoss: stock?.stopLoss ?? null, takeProfit: stock?.takeProfit ?? null
+});
+
 const makeSnapshot = (source = rankCandidates(), dataMode = 'illustrative') => {
   const ranked = rankCandidates(source).slice(0, 5);
   return {
@@ -124,6 +136,7 @@ export default function App() {
   useEffect(() => { const timer = setInterval(() => { setHourNow(Date.now()); setBlueClock(Date.now()); }, 1000); return () => clearInterval(timer); }, []);
   useEffect(() => { localStorage.setItem('stocktrends-blue-stocks-v1', JSON.stringify(blueStocks)); }, [blueStocks]);
   useEffect(() => { localStorage.setItem('stocktrends-blue-trades-v1', JSON.stringify(blueTrades)); }, [blueTrades]);
+  useEffect(() => { localStorage.setItem('stocktrends-learning-journal-v1', JSON.stringify(learningJournal)); }, [learningJournal]);
   useEffect(() => { localStorage.setItem('stocktrends-red-review-v1', JSON.stringify(redReview)); }, [redReview]);
 
   async function reviewRedPatterns() {
@@ -265,11 +278,15 @@ export default function App() {
       return;
     }
     try {
-      const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(stock.symbol)}&interval=1min&outputsize=21`);
+      const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(stock.symbol)}&interval=1min&outputsize=60`);
       const payload = await response.json();
       if (!response.ok || !payload.candles?.length) throw new Error(payload.error || 'Verified live price unavailable.');
-      const candle = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))).at(-1);
-      const trade = { id: crypto.randomUUID?.() || String(Date.now()), symbol: stock.symbol, name: stock.name, direction: stock.direction || 'UP', entryPrice: Number(candle.close), currentPrice: Number(candle.close), startedAt: new Date().toISOString(), endsAt: new Date(Date.now()+10*60*1000).toISOString(), status:'RUNNING' };
+      const candles = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime)));
+      const candle = candles.at(-1), entryPrice = Number(candle.close), startedAt = new Date().toISOString();
+      let indicators = {};
+      try { if (candles.length >= 35) { const analysis = analyzeCandles(candles); indicators = { indicators: analysis.indicators, signalFeatures: analysis.signalFeatures, score: analysis.score, direction: analysis.direction, reason: analysis.reason, candleTime: analysis.candleTime }; } } catch { /* Raw candle remains available in the journal. */ }
+      const entrySnapshot = { ...captureMarketSnapshot({ ...stock, price: entryPrice, ...indicators }, startedAt), candle: { datetime: candle.datetime, open: Number(candle.open), high: Number(candle.high), low: Number(candle.low), close: entryPrice, volume: Number(candle.volume) || null } };
+      const trade = { id: crypto.randomUUID?.() || String(Date.now()), symbol: stock.symbol, name: stock.name, direction: stock.direction || 'UP', entryPrice, currentPrice: entryPrice, startedAt, endsAt: new Date(Date.now()+10*60*1000).toISOString(), status:'RUNNING', entrySnapshot };
       setBlueTrades(previous=>[trade,...previous]);
       setNotice(`Started ${stock.symbol}: 10-minute simulated trade. It will be force-closed at expiry.`);
     } catch (error) { setNotice(`Could not start ${stock.symbol}: ${error.message}`); }
@@ -278,12 +295,17 @@ export default function App() {
   async function closeBlueTrade(trade, forced = false, reason = '') {
     if (!trade || trade.closedAt) return;
     try {
-      const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(trade.symbol)}&interval=1min&outputsize=21`);
+      const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(trade.symbol)}&interval=1min&outputsize=60`);
       const payload = await response.json();
       if (!response.ok || !payload.candles?.length) throw new Error(payload.error || 'Could not verify exit price.');
-      const candle = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime))).at(-1);
+      const candles = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime)));
+      const candle = candles.at(-1);
       const exitPrice = Number(candle.close), rawMove = (exitPrice-trade.entryPrice)/trade.entryPrice*100, pnlPct = trade.direction === 'DOWN' ? -rawMove : rawMove;
-      const closed = { ...trade, currentPrice:exitPrice, exitPrice, exitTime:candle.datetime, closedAt:new Date().toISOString(), status: forced ? 'FORCED CLOSED' : (reason ? reason : 'CLOSED'), exitReason: reason || (forced ? '10-MINUTE TIME LIMIT' : 'MANUAL SALE'), pnlPct, result: pnlPct >= 0 ? 'WIN' : 'LOSS' };
+      const closedAt = new Date().toISOString();
+      let indicators = {};
+      try { if (candles.length >= 35) { const analysis = analyzeCandles(candles); indicators = { indicators: analysis.indicators, signalFeatures: analysis.signalFeatures, score: analysis.score, direction: analysis.direction, reason: analysis.reason, candleTime: analysis.candleTime }; } } catch { /* Raw exit candle remains available. */ }
+      const exitSnapshot = { ...captureMarketSnapshot({ symbol: trade.symbol, price: exitPrice, ...indicators }, closedAt), candle: { datetime: candle.datetime, open: Number(candle.open), high: Number(candle.high), low: Number(candle.low), close: exitPrice, volume: Number(candle.volume) || null } };
+      const closed = { ...trade, currentPrice:exitPrice, exitPrice, exitTime:candle.datetime, closedAt, exitSnapshot, status: forced ? 'FORCED CLOSED' : (reason ? reason : 'CLOSED'), exitReason: reason || (forced ? '10-MINUTE TIME LIMIT' : 'MANUAL SALE'), pnlPct, result: pnlPct >= 0 ? 'WIN' : 'LOSS' };
       setBlueTrades(previous=>previous.map(t=>t.id===trade.id?closed:t));
       setNotice(`${trade.symbol} ${forced?'force-closed':(reason ? `AI sold (${reason})` : 'sold')}: ${pnlPct>=0?'+':''}${pnlPct.toFixed(3)}% simulated ${pnlPct>=0?'profit':'loss'}.`);
     } catch(error) { setNotice(`Exit for ${trade.symbol} not recorded: ${error.message}. Trade remains open for retry.`); }
@@ -296,7 +318,7 @@ export default function App() {
       for (const trade of active) {
         if (Date.now() >= new Date(trade.endsAt).getTime()) { await closeBlueTrade(trade, true); continue; }
         try {
-          const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(trade.symbol)}&interval=1min&outputsize=21`);
+          const response = await fetch(`/api/market-data?symbol=${encodeURIComponent(trade.symbol)}&interval=1min&outputsize=60`);
           const payload = await response.json();
           if (response.ok && payload.candles?.length) {
             const candles = [...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime)));
@@ -351,6 +373,27 @@ export default function App() {
     ? ranked.slice(0, 5).map((stock, index) => ({ ...stock, rank: index + 1, referencePrice: stock.price, referenceChange: stock.change, direction: stock.direction, reason: stock.reason }))
     : (currentSnapshot?.picks || ranked.slice(0, 5).map((stock, index) => ({ ...stock, rank: index + 1 })));
   const learnedWeights = useMemo(() => learnIndicatorWeights(trades), [trades]);
+  const learningJournal = useMemo(() => {
+    const stockEvents = trades.map(trade => ({
+      id: trade.id, time: trade.time, symbol: trade.symbol, mode: 'Stock paper portfolio',
+      event: trade.side, price: trade.price, pnl: trade.side === 'SELL' ? (trade.realizedPnl ?? null) : null,
+      outcome: trade.side === 'SELL' ? ((trade.realizedPnl ?? 0) > 0 ? 'WIN' : (trade.realizedPnl ?? 0) < 0 ? 'LOSS' : 'BREAKEVEN') : 'ENTRY',
+      reason: trade.reason || '', entrySnapshot: trade.entrySnapshot || null,
+      exitSnapshot: trade.exitSnapshot || (trade.side === 'SELL' ? trade.marketSnapshot || null : null),
+      legacy: !trade.entrySnapshot && !trade.exitSnapshot
+    }));
+    const timedEvents = blueTrades.map(trade => ({
+      id: trade.id, time: trade.closedAt || trade.startedAt, symbol: trade.symbol,
+      mode: RED_INSTRUMENTS.some(item => item.symbol === trade.symbol) ? 'Red crypto/forex' : 'Blue stocks',
+      event: trade.closedAt ? 'CLOSED' : 'ENTRY', price: trade.closedAt ? trade.exitPrice : trade.entryPrice,
+      pnl: trade.closedAt ? trade.pnlPct : null, outcome: trade.closedAt ? trade.result : 'ENTRY',
+      reason: trade.exitReason || trade.aiSignal || 'Timed paper session',
+      entrySnapshot: trade.entrySnapshot || null, exitSnapshot: trade.exitSnapshot || null,
+      legacy: !trade.entrySnapshot || (trade.closedAt && !trade.exitSnapshot)
+    }));
+    return [...stockEvents, ...timedEvents].filter(item => item.time).sort((a,b) => String(b.time).localeCompare(String(a.time)));
+  }, [trades, blueTrades]);
+
   const stocksBySymbol = useMemo(() => Object.fromEntries(ranked.map(stock => [stock.symbol, stock])), [ranked]);
   const openPositions = Object.entries(positions).filter(([, position]) => position.shares > 0);
   const marketValue = openPositions.reduce((sum, [symbol, position]) => sum + (stocksBySymbol[symbol]?.price || position.averageCost || 0) * position.shares, 0);
@@ -376,8 +419,10 @@ export default function App() {
     const newShares = old.shares + shares;
     const averageCost = ((old.averageCost * old.shares) + cost) / newShares;
     setCash(previous => previous - cost);
-    setPositions(previous => ({ ...previous, [stock.symbol]: { shares: newShares, averageCost, entryFeatures: old.entryFeatures || stock.signalFeatures || null, stopLoss: stock.stopLoss || old.stopLoss || null, takeProfit: stock.takeProfit || old.takeProfit || null, entryReason: old.entryReason || stock.reason || null } }));
-    setTrades(previous => [{ id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, symbol: stock.symbol, side: 'BUY', shares, price: stock.price, averageCostAtSale: averageCost, realizedPnl: 0, entryFeatures: stock.signalFeatures || null, reason: stock.reason || 'Manual paper buy', time: new Date().toISOString() }, ...previous]);
+    const capturedAt = new Date().toISOString();
+    const entrySnapshot = old.entrySnapshot || captureMarketSnapshot(stock, capturedAt);
+    setPositions(previous => ({ ...previous, [stock.symbol]: { shares: newShares, averageCost, entryFeatures: old.entryFeatures || stock.signalFeatures || null, entrySnapshot, stopLoss: stock.stopLoss || old.stopLoss || null, takeProfit: stock.takeProfit || old.takeProfit || null, entryReason: old.entryReason || stock.reason || null } }));
+    setTrades(previous => [{ id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, symbol: stock.symbol, side: 'BUY', shares, price: stock.price, averageCostAtSale: averageCost, realizedPnl: 0, entryFeatures: stock.signalFeatures || null, entrySnapshot, reason: stock.reason || 'Manual paper buy', time: capturedAt }, ...previous]);
     setNotice(`Paper buy recorded: ${shares} ${stock.symbol} share(s). No real order was placed.`);
   }
 
@@ -395,7 +440,9 @@ export default function App() {
       return next;
     });
     const tradePnl = (stock.price - averageCostAtSale) * shares;
-    setTrades(previous => [{ id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, symbol: stock.symbol, side: 'SELL', shares, price: stock.price, averageCostAtSale, realizedPnl: tradePnl, entryFeatures: old.entryFeatures || null, reason: stock.reason || 'Manual paper sell', time: new Date().toISOString() }, ...previous]);
+    const soldAt = new Date().toISOString();
+    const exitSnapshot = captureMarketSnapshot(stock, soldAt);
+    setTrades(previous => [{ id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, symbol: stock.symbol, side: 'SELL', shares, price: stock.price, averageCostAtSale, realizedPnl: tradePnl, entryFeatures: old.entryFeatures || null, entrySnapshot: old.entrySnapshot || null, exitSnapshot, reason: stock.reason || 'Manual paper sell', time: soldAt }, ...previous]);
     setNotice(`Paper sell recorded: ${shares} ${stock.symbol} share(s) · ${tradePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(tradePnl))}. No real order was placed.`);
   }
 
@@ -430,8 +477,8 @@ export default function App() {
       return next;
     });
     setTrades(previous => [
-      ...(buyQty > 0 ? [{ id: crypto.randomUUID?.() || `${Date.now()}-buy`, symbol: replacement.symbol, side: 'BUY', shares: buyQty, price: replacement.price, averageCostAtSale: replacement.price, realizedPnl: 0, entryFeatures: replacement.signalFeatures || null, time: now, reason: `AI rotation from ${weakest.symbol}` }] : []),
-      { id: crypto.randomUUID?.() || `${Date.now()}-sell`, symbol: weakest.symbol, side: 'SELL', shares: sellQty, price: salePrice, averageCostAtSale: weakest.position.averageCost, realizedPnl: salePnl, entryFeatures: weakest.position.entryFeatures || null, time: now, reason: `AI rotation → ${replacement.symbol}` },
+      ...(buyQty > 0 ? [{ id: crypto.randomUUID?.() || `${Date.now()}-buy`, symbol: replacement.symbol, side: 'BUY', shares: buyQty, price: replacement.price, averageCostAtSale: replacement.price, realizedPnl: 0, entryFeatures: replacement.signalFeatures || null, entrySnapshot: captureMarketSnapshot(replacement, now), time: now, reason: `AI rotation from ${weakest.symbol}` }] : []),
+      { id: crypto.randomUUID?.() || `${Date.now()}-sell`, symbol: weakest.symbol, side: 'SELL', shares: sellQty, price: salePrice, averageCostAtSale: weakest.position.averageCost, realizedPnl: salePnl, entryFeatures: weakest.position.entryFeatures || null, entrySnapshot: weakest.position.entrySnapshot || null, exitSnapshot: captureMarketSnapshot(weakest.stock, now), time: now, reason: `AI rotation → ${replacement.symbol}` },
       ...previous
     ]);
     setNotice(buyQty > 0 ? `AI rotation: sold ${weakest.symbol} (${salePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(salePnl))}) and bought ${replacement.symbol}. Rule-based sample scoring only.` : `Sold ${weakest.symbol} (${salePnl >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(salePnl))}), but available cash could not buy ${replacement.symbol}.`);
@@ -492,7 +539,7 @@ export default function App() {
         const shares = position.shares;
         const realizedPnl = (stock.price - position.averageCost) * shares;
         nextCash += stock.price * shares;
-        nextTrades.unshift({ id: crypto.randomUUID?.() || `${Date.now()}-${stock.symbol}-sell`, symbol: stock.symbol, side: 'SELL', shares, price: stock.price, averageCostAtSale: position.averageCost, realizedPnl, entryFeatures: position.entryFeatures || null, reason, time: scannedAt });
+        nextTrades.unshift({ id: crypto.randomUUID?.() || `${Date.now()}-${stock.symbol}-sell`, symbol: stock.symbol, side: 'SELL', shares, price: stock.price, averageCostAtSale: position.averageCost, realizedPnl, entryFeatures: position.entryFeatures || null, entrySnapshot: position.entrySnapshot || null, exitSnapshot: captureMarketSnapshot(stock, scannedAt), reason, time: scannedAt });
         delete nextPositions[stock.symbol];
         actions.push(`sold ${stock.symbol} (${realizedPnl >= 0 ? '+' : '−'}${money(Math.abs(realizedPnl))})`);
       }
@@ -500,8 +547,9 @@ export default function App() {
         if (stock.action !== 'BUY' || nextPositions[stock.symbol]?.shares || Object.values(nextPositions).filter(p => p?.shares > 0).length >= MAX_CONCURRENT_POSITIONS) continue;
         if (stock.price > nextCash) continue;
         nextCash -= stock.price;
-        nextPositions[stock.symbol] = { shares: 1, averageCost: stock.price, entryFeatures: stock.signalFeatures, stopLoss: stock.stopLoss, takeProfit: stock.takeProfit, entryReason: stock.reason, entryTime: scannedAt };
-        nextTrades.unshift({ id: crypto.randomUUID?.() || `${Date.now()}-${stock.symbol}-buy`, symbol: stock.symbol, side: 'BUY', shares: 1, price: stock.price, averageCostAtSale: stock.price, realizedPnl: 0, entryFeatures: stock.signalFeatures, reason: `Automatic paper entry: ${stock.reason}`, time: scannedAt });
+        const entrySnapshot = captureMarketSnapshot(stock, scannedAt);
+        nextPositions[stock.symbol] = { shares: 1, averageCost: stock.price, entryFeatures: stock.signalFeatures, entrySnapshot, stopLoss: stock.stopLoss, takeProfit: stock.takeProfit, entryReason: stock.reason, entryTime: scannedAt };
+        nextTrades.unshift({ id: crypto.randomUUID?.() || `${Date.now()}-${stock.symbol}-buy`, symbol: stock.symbol, side: 'BUY', shares: 1, price: stock.price, averageCostAtSale: stock.price, realizedPnl: 0, entryFeatures: stock.signalFeatures, entrySnapshot, reason: `Automatic paper entry: ${stock.reason}`, time: scannedAt });
         actions.push(`bought ${stock.symbol} (1 share)`);
       }
       setPositions(nextPositions);
@@ -679,7 +727,9 @@ export default function App() {
         {!redReview && <div className="empty-state"><div className="empty-icon"><BrainCircuit size={22}/></div><strong>No review run yet</strong><p>Press Review patterns to examine available crypto and forex candles. Instruments without verified provider data will be listed as unavailable.</p></div>}
         {redReview && <><div className="red-summary"><div><span>Instruments reviewed</span><strong>{redReview.instrumentsReviewed}/30</strong></div><div><span>Candle observations</span><strong>{redReview.observations}</strong></div><div><span>Patterns checked</span><strong>{redReview.patterns.length}</strong></div><div><span>Last review</span><strong>{new Date(redReview.reviewedAt).toLocaleTimeString()}</strong></div></div>
           <div className="red-summary"><div><span>Research optimisation</span><strong>{redReview.optimizationScore ?? 0}% / 100%</strong></div><div><span>Completed paper sessions</span><strong>{redReview.closedSessions ?? 0}</strong></div><div><span>Paper-session win rate</span><strong>{redReview.winRate == null ? 'Not enough data' : redReview.winRate.toFixed(1) + '%'}</strong></div><div><span>Pattern sample coverage</span><strong>{redReview.patterns.filter(p=>p.samples>=20).length} qualified</strong></div></div>
-          <div className="empty-state"><strong>What the system learnt</strong><p>{redReview.summary}</p><p><b>Next optimisation:</b> collect more closed paper sessions and compare candidate patterns against a simple baseline on unseen candles before changing entry/exit rules.</p></div>
+          <div className="empty-state learning-journal-summary"><strong>Persistent learning journal</strong><p>{learningJournal.length} paper-trading events are saved in this browser. New records capture entry/exit market snapshots, indicator readings when available, candle OHLCV, timestamps, decision reasons and outcomes. Older records remain available and are flagged when snapshots are missing.</p><div className="journal-metrics"><span><b>{learningJournal.filter(row => row.entrySnapshot).length}</b> entries with snapshots</span><span><b>{learningJournal.filter(row => row.exitSnapshot).length}</b> exits with snapshots</span><span><b>{learningJournal.filter(row => row.outcome === 'WIN').length}</b> wins</span><span><b>{learningJournal.filter(row => row.outcome === 'LOSS').length}</b> losses</span></div></div>
+          <div className="table-wrap"><table><thead><tr><th>TIME</th><th>MODE / SYMBOL</th><th>EVENT</th><th>PRICE</th><th>RESULT</th><th>ENTRY / EXIT EVIDENCE</th><th>DECISION REASON</th></tr></thead><tbody>{learningJournal.slice(0,30).map(row => <tr key={row.id + row.mode + row.event}><td>{row.time ? new Date(row.time).toLocaleString() : '—'}</td><td><strong>{row.symbol}</strong><small className="journal-stock-name">{row.mode}</small></td><td>{row.event}</td><td>{Number.isFinite(Number(row.price)) ? money(row.price) : '—'}</td><td className={row.pnl == null ? '' : row.pnl >= 0 ? 'positive-text' : 'negative-text'}>{row.pnl == null ? row.outcome : (row.mode === 'Stock paper portfolio' ? money(row.pnl) : signedPercent(row.pnl)) + ' · ' + row.outcome}</td><td>{row.entrySnapshot ? 'Entry snapshot saved' : 'Entry snapshot missing'} / {row.exitSnapshot ? 'exit saved' : row.event === 'SELL' || row.event === 'CLOSED' ? 'exit snapshot missing' : 'not closed'}</td><td>{row.reason || '—'}{row.legacy ? ' · legacy record' : ''}</td></tr>)}</tbody></table></div>
+          <div className="empty-state"><strong>What the system learnt</strong><p>{redReview.summary}</p><p><b>Next optimisation:</b> compare entry conditions with exit outcomes on unseen candles before changing trading rules.</p></div>
           <div className="table-wrap"><table><thead><tr><th>OBSERVED CONDITION</th><th>SAMPLES</th><th>NEXT CANDLE UP</th><th>DIRECTIONAL ACCURACY</th><th>AVERAGE NEXT MOVE</th></tr></thead><tbody>{redReview.patterns.map(pattern => <tr key={pattern.name}><td><strong>{pattern.name}</strong></td><td>{pattern.samples}</td><td>{pattern.upRate === null ? '—' : pattern.upRate.toFixed(1) + '%'}</td><td>{pattern.directionalAccuracy == null ? '—' : pattern.directionalAccuracy.toFixed(1) + '%'}</td><td className={pattern.avgNextMove >= 0 ? 'positive-text' : 'negative-text'}>{signedPercent(pattern.avgNextMove)}</td></tr>)}</tbody></table></div>
           {redReview.unavailable.length > 0 && <p className="snapshot-note">Unavailable ({redReview.unavailable.length}): {redReview.unavailable.map(item=>item.symbol).join(', ')}. Check provider symbol support, API credits, and the API key.</p>}
           <p className="red-disclaimer">Historical paper-research only. The optimisation score measures data coverage and analysis breadth, not a probability of profit. Patterns are correlations, can overfit, and must be validated on unseen data before being used to change trading rules. No orders are placed and no profit is guaranteed. Review time: {new Date(redReview.reviewedAt).toLocaleString()}.</p>
