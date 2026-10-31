@@ -122,6 +122,7 @@ export default function App() {
   const [blueClock, setBlueClock] = useState(Date.now());
   const [redReview, setRedReview] = useState(() => readStore('stocktrends-red-review-v1', null));
   const [redReviewBusy, setRedReviewBusy] = useState(false);
+  const [learningJournal, setLearningJournal] = useState(() => readStore('stocktrends-learning-journal-v1', []));
 
 
   useEffect(() => { localStorage.setItem(STORE.cash, JSON.stringify(cash)); }, [cash]);
@@ -137,6 +138,42 @@ export default function App() {
   useEffect(() => { localStorage.setItem('stocktrends-blue-stocks-v1', JSON.stringify(blueStocks)); }, [blueStocks]);
   useEffect(() => { localStorage.setItem('stocktrends-blue-trades-v1', JSON.stringify(blueTrades)); }, [blueTrades]);
   useEffect(() => { localStorage.setItem('stocktrends-learning-journal-v1', JSON.stringify(learningJournal)); }, [learningJournal]);
+  useEffect(() => {
+    const stockEvents = trades.map(trade => ({
+      id: trade.id, time: trade.time, symbol: trade.symbol, mode: 'Stock paper portfolio',
+      event: trade.side, price: trade.price, pnl: trade.side === 'SELL' ? (trade.realizedPnl ?? null) : null,
+      outcome: trade.side === 'SELL' ? ((trade.realizedPnl ?? 0) > 0 ? 'WIN' : (trade.realizedPnl ?? 0) < 0 ? 'LOSS' : 'BREAKEVEN') : 'ENTRY',
+      reason: trade.reason || '', entrySnapshot: trade.entrySnapshot || null,
+      exitSnapshot: trade.exitSnapshot || (trade.side === 'SELL' ? trade.marketSnapshot || null : null),
+      legacy: !trade.entrySnapshot && !trade.exitSnapshot
+    }));
+    const timedEvents = blueTrades.flatMap(trade => {
+      const mode = RED_INSTRUMENTS.some(item => item.symbol === trade.symbol) ? 'Red crypto/forex' : 'Blue stocks';
+      const events = [{
+        id: trade.id, time: trade.startedAt, symbol: trade.symbol, mode, event: 'ENTRY',
+        price: trade.entryPrice, pnl: null, outcome: 'ENTRY', reason: 'Timed paper session started',
+        entrySnapshot: trade.entrySnapshot || null, exitSnapshot: null, legacy: !trade.entrySnapshot
+      }];
+      if (trade.closedAt) events.push({
+        id: trade.id, time: trade.closedAt, symbol: trade.symbol, mode, event: 'CLOSED',
+        price: trade.exitPrice, pnl: trade.pnlPct, outcome: trade.result || 'CLOSED',
+        reason: trade.exitReason || 'Timed paper session closed',
+        entrySnapshot: trade.entrySnapshot || null, exitSnapshot: trade.exitSnapshot || null,
+        legacy: !trade.entrySnapshot || !trade.exitSnapshot
+      });
+      return events;
+    });
+    const incoming = [...stockEvents, ...timedEvents].filter(item => item.time);
+    setLearningJournal(previous => {
+      const byKey = new Map(previous.map(item => [`${item.id}|${item.mode}|${item.event}|${item.time}`, item]));
+      for (const item of incoming) {
+        const key = `${item.id}|${item.mode}|${item.event}|${item.time}`;
+        byKey.set(key, { ...(byKey.get(key) || {}), ...item });
+      }
+      return [...byKey.values()].sort((a,b) => String(b.time).localeCompare(String(a.time)));
+    });
+  }, [trades, blueTrades]);
+
   useEffect(() => { localStorage.setItem('stocktrends-red-review-v1', JSON.stringify(redReview)); }, [redReview]);
 
   async function reviewRedPatterns() {
@@ -373,26 +410,7 @@ export default function App() {
     ? ranked.slice(0, 5).map((stock, index) => ({ ...stock, rank: index + 1, referencePrice: stock.price, referenceChange: stock.change, direction: stock.direction, reason: stock.reason }))
     : (currentSnapshot?.picks || ranked.slice(0, 5).map((stock, index) => ({ ...stock, rank: index + 1 })));
   const learnedWeights = useMemo(() => learnIndicatorWeights(trades), [trades]);
-  const learningJournal = useMemo(() => {
-    const stockEvents = trades.map(trade => ({
-      id: trade.id, time: trade.time, symbol: trade.symbol, mode: 'Stock paper portfolio',
-      event: trade.side, price: trade.price, pnl: trade.side === 'SELL' ? (trade.realizedPnl ?? null) : null,
-      outcome: trade.side === 'SELL' ? ((trade.realizedPnl ?? 0) > 0 ? 'WIN' : (trade.realizedPnl ?? 0) < 0 ? 'LOSS' : 'BREAKEVEN') : 'ENTRY',
-      reason: trade.reason || '', entrySnapshot: trade.entrySnapshot || null,
-      exitSnapshot: trade.exitSnapshot || (trade.side === 'SELL' ? trade.marketSnapshot || null : null),
-      legacy: !trade.entrySnapshot && !trade.exitSnapshot
-    }));
-    const timedEvents = blueTrades.map(trade => ({
-      id: trade.id, time: trade.closedAt || trade.startedAt, symbol: trade.symbol,
-      mode: RED_INSTRUMENTS.some(item => item.symbol === trade.symbol) ? 'Red crypto/forex' : 'Blue stocks',
-      event: trade.closedAt ? 'CLOSED' : 'ENTRY', price: trade.closedAt ? trade.exitPrice : trade.entryPrice,
-      pnl: trade.closedAt ? trade.pnlPct : null, outcome: trade.closedAt ? trade.result : 'ENTRY',
-      reason: trade.exitReason || trade.aiSignal || 'Timed paper session',
-      entrySnapshot: trade.entrySnapshot || null, exitSnapshot: trade.exitSnapshot || null,
-      legacy: !trade.entrySnapshot || (trade.closedAt && !trade.exitSnapshot)
-    }));
-    return [...stockEvents, ...timedEvents].filter(item => item.time).sort((a,b) => String(b.time).localeCompare(String(a.time)));
-  }, [trades, blueTrades]);
+
 
   const stocksBySymbol = useMemo(() => Object.fromEntries(ranked.map(stock => [stock.symbol, stock])), [ranked]);
   const openPositions = Object.entries(positions).filter(([, position]) => position.shares > 0);
@@ -473,7 +491,7 @@ export default function App() {
     setPositions(previous => {
       const next = { ...previous };
       delete next[weakest.symbol];
-      if (buyQty > 0) next[replacement.symbol] = { shares: buyQty, averageCost: replacement.price, entryFeatures: replacement.signalFeatures || null, stopLoss: replacement.stopLoss || null, takeProfit: replacement.takeProfit || null, entryReason: `AI rotation from ${weakest.symbol}` };
+      if (buyQty > 0) next[replacement.symbol] = { shares: buyQty, averageCost: replacement.price, entryFeatures: replacement.signalFeatures || null, entrySnapshot: captureMarketSnapshot(replacement, now), stopLoss: replacement.stopLoss || null, takeProfit: replacement.takeProfit || null, entryReason: `AI rotation from ${weakest.symbol}` };
       return next;
     });
     setTrades(previous => [
@@ -667,13 +685,13 @@ export default function App() {
   }
 
   function exportData() {
-    const payload = { exportedAt: new Date().toISOString(), mode: liveStocks.length ? 'paper-trading / Twelve Data + technical indicators' : 'paper-trading / illustrative-data', snapshots, dailyJournal, trades, positions, cash, liveStocks, lastScanAt, learnedWeights };
+    const payload = { exportedAt: new Date().toISOString(), mode: liveStocks.length ? 'paper-trading / Twelve Data + technical indicators' : 'paper-trading / illustrative-data', snapshots, dailyJournal, trades, blueTrades, learningJournal, positions, cash, liveStocks, lastScanAt, learnedWeights };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = `stocktrends-export-${todayKey()}.json`; anchor.click();
     URL.revokeObjectURL(url);
-    setNotice('Daily R100 journal, predictions and paper trades exported as JSON.');
+    setNotice('Predictions, stock and timed paper trades, indicator snapshots, and persistent learning journal exported as JSON.');
   }
 
   const nav = [
