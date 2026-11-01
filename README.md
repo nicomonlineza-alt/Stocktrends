@@ -6,7 +6,7 @@ Stocktrends is an educational stock-research prototype focused on a five-stock d
 
 - Responsive dark/glass dashboard for desktop and mobile.
 - Ten illustrative NASDAQ-listed candidate examples.
-- On-demand Twelve Data market scan for the 10-stock candidate universe, with verified candle timestamps and a clear sample-data fallback.
+- On-demand market scan for the candidate universe using Finnhub for supported US-equity candles and Twelve Data as fallback / pair-data provider, with verified candle timestamps and a clear sample-data fallback.
 - Technical analysis of EMA 9/21, RSI(14), MACD, ATR, 20-candle momentum and relative volume; transparent BUY / HOLD / SELL signals and ATR-based stop/target levels.
 - Adaptive indicator weights that begin adjusting after five closed paper trades, using logged entry features and realised outcomes.
 - Five daily candidates are recorded once per New York calendar date in the browser's local storage; existing daily records are not overwritten by the daily-pick action.
@@ -16,7 +16,7 @@ Stocktrends is an educational stock-research prototype focused on a five-stock d
 - Simulated cash, share positions, average cost, buy/sell ledger, and account reset.
 - Export of prediction records and paper-trading data as JSON.
 - Company research links.
-- Initial server-side Twelve Data endpoint scaffold at `/api/market-data`, with symbol/interval validation and provider error handling.
+- Server-side `/api/market-data` endpoint supports Finnhub for plain equity tickers and falls back to Twelve Data when available; slash-formatted forex/crypto pairs continue through Twelve Data. Provider keys are read only from server-side environment variables.
 
 ## Important limitations
 
@@ -36,12 +36,12 @@ npm run dev
 npm run build
 ```
 
-The `.env.example` file documents the required variable name only; it does not contain a real key. For a local serverless-function test, use a local Vercel development environment and set `TWELVE_DATA_API_KEY` privately in your local environment. Do not commit a real `.env` file.
+The `.env.example` file documents the required variable name only; it does not contain a real key. For a local serverless-function test, use a local Vercel development environment and set `FINNHUB_API_KEY` and/or `TWELVE_DATA_API_KEY` privately in your local environment. Do not commit a real `.env` file.
 
 ## Next milestones
 
 1. Verify production build and endpoint behaviour.
-2. Verify that the private Twelve Data key is configured in the Vercel production environment and test the live scan end-to-end.
+2. Configure private `FINNHUB_API_KEY` and/or `TWELVE_DATA_API_KEY` in Vercel, redeploy, and test provider access end-to-end.
 3. Add a durable server-side database so paper positions and learning history persist across devices.
 4. Automatically evaluate frozen daily picks against verified future prices; add spread/fees, slippage, drawdown, benchmark comparisons, and out-of-sample testing.
 5. Add a scheduled scan service only after the rules have been validated; browser-triggered scans do not run when the app is closed.
