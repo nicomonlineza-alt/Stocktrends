@@ -56,8 +56,8 @@ export default function BlackDashboard(){
         }catch(e){/* skip unavailable symbol */}
       }
       const picks=candidates.sort((a,b)=>b.confidence-a.confidence).slice(0,5);
-      if(picks.length<5)setMessage('Only '+picks.length+' candidates had enough verified market data for '+duration.label+'. The app will not invent missing prices; try again when more feeds are available.');
-      if(picks.length){setTrades(old=>[...picks,...old]);setMessage('Found '+picks.length+' ranked simulated research candidate(s) for '+duration.label+'. '+picks.filter(x=>x.quality==='STRONG').length+' are marked stronger; WATCH candidates are lower-confidence experiments. Each uses an imaginary R100 stake.');}
+      if(picks.length){setTrades(old=>[...picks,...old]);const strong=picks.filter(x=>x.quality==='STRONG').length;setMessage('Found '+picks.length+' ranked simulated research candidate(s) for '+duration.label+'. '+strong+' are marked stronger; WATCH candidates are lower-confidence experiments. '+(picks.length<5?'Only '+picks.length+' had verified market data; unavailable feeds were not fabricated. ':'')+'Each uses an imaginary R100 stake.');}
+      else setMessage('No symbols returned enough verified market data for '+duration.label+'. No prices or candidates were fabricated.');
     }finally{setBusy(false)}
   }
   async function closeTrade(t,price,reason){
