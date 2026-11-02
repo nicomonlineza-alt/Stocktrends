@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './lib/supabase.js';
 import { analyzeCandles, learnIndicatorWeights, exitReason } from './strategy.js';
+import BlackDashboard from './BlackDashboard.jsx';
 import {
   Activity, ArrowDownRight, ArrowUpRight, BarChart3, BrainCircuit, CircleHelp,
   ExternalLink, Eye, LayoutDashboard, ShieldCheck, Sparkles,
@@ -894,6 +895,7 @@ export default function App() {
       <button className={`nav-item red-nav-item ${activeTab === 'Red Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Red Dashboard')}><Activity size={18}/>Red</button>
       <button className={`nav-item red-review-nav-item ${activeTab === 'Red Review' ? 'active' : ''}`} onClick={() => setActiveTab('Red Review')}><BrainCircuit size={18}/>Review</button>
       <button className={`nav-item green-nav-item ${activeTab === 'Green Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Green Dashboard')}><Activity size={18}/>Green</button>
+      <button className={`nav-item black-nav-item ${activeTab === 'Black Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Black Dashboard')}><BrainCircuit size={18}/>Black</button>
       {nav.map(({ name, icon: Icon }) => <button key={name} className={`nav-item ${activeTab === name ? 'active' : ''}`} onClick={() => setActiveTab(name)}><Icon size={18} />{name}</button>)}
       <div className="sidebar-bottom"><div className="status-dot" /><span>Paper research mode</span><span className="version">v0.2</span></div>
     </aside>
@@ -1017,6 +1019,8 @@ export default function App() {
         {snapshots.length === 0 ? <div className="empty-state"><strong>No daily records yet</strong><p>Today's five picks will be recorded automatically.</p></div> : <div className="snapshot-list">{[...snapshots].sort((a, b) => b.id.localeCompare(a.id)).map(snapshot => <div className="snapshot-card" key={snapshot.id}><div className="snapshot-head"><div><strong>{snapshot.id}</strong><small>Saved {new Date(snapshot.createdAt).toLocaleString()} · {snapshot.method}</small></div><span className="signal signal-watch">{snapshot.dataMode === 'illustrative' ? 'SAMPLE DATA' : 'VERIFIED DATA'}</span></div><div className="table-wrap"><table><thead><tr><th>RANK</th><th>STOCK</th><th>REFERENCE PRICE</th><th>SCORE</th><th>FORECAST BIAS</th><th>OUTCOME</th></tr></thead><tbody>{snapshot.picks.map(pick => <tr key={pick.symbol}><td>{pick.rank}</td><td><strong>{pick.symbol}</strong></td><td>{money(pick.referencePrice)}</td><td>{pick.score}</td><td>{pick.direction}</td><td>{pick.outcome === 'PENDING' ? <div className="outcome-actions"><button onClick={() => markOutcome(snapshot.id, pick.symbol, 'CORRECT')}>Correct</button><button onClick={() => markOutcome(snapshot.id, pick.symbol, 'INCORRECT')}>Incorrect</button></div> : <span className={pick.outcome === 'CORRECT' ? 'positive-text' : 'negative-text'}>{pick.outcome}</span>}</td></tr>)}</tbody></table></div><p className="snapshot-note">Only resolve a pick after its forecast horizon ends and the real closing price is checked. Because this prototype uses sample prices, outcome labels are manual and are not a verified backtest.</p></div>)}</div>}
         <div className="panel-footer"><span><Clock3 size={14} /> Existing daily records are not replaced by the refresh button.</span><button className="text-button" onClick={exportData}>Export full history →</button></div>
       </section>}
+
+      {activeTab === 'Black Dashboard' && <BlackDashboard />}
 
       <footer className="footer"><span>STOCKTRENDS <span className="footer-separator">/</span> EDUCATIONAL RESEARCH PROTOTYPE</span><span><ShieldCheck size={14} /> No broker connection · No real orders</span></footer>
     </main>
