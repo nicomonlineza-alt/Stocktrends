@@ -884,7 +884,8 @@ export default function App() {
   const nav = [
     { name: 'Overview', icon: LayoutDashboard }, { name: 'Watchlist', icon: Eye },
     { name: 'Paper trading', icon: Wallet }, { name: 'Performance', icon: BarChart3 },
-    { name: 'Prediction log', icon: History }, { name: 'R100 journal', icon: BookOpen }
+    { name: 'Prediction log', icon: History }, { name: 'R100 journal', icon: BookOpen },
+    { name: 'Data health', icon: ShieldCheck }
   ];
 
   return <div className="app-shell">
@@ -967,6 +968,49 @@ export default function App() {
           <p className="red-disclaimer">Historical paper-research only. The optimisation score measures data coverage and analysis breadth, not a probability of profit. Patterns are correlations, can overfit, and must be validated on unseen data before being used to change trading rules. No orders are placed and no profit is guaranteed. Review time: {new Date(redReview.reviewedAt).toLocaleString()}.</p>
         </>}
       </section>}
+
+      {activeTab === 'Data health' && (() => {
+        const sources = [
+          { name: 'Overview scan', rows: liveStocks, interval: 'Scan feed' },
+          { name: 'Blue watchlist', rows: blueStocks, interval: '5-minute candles' },
+          { name: 'Green watchlist', rows: greenStocks, interval: '15-minute candles' }
+        ];
+        const now = Date.now();
+        const checked = sources.map(source => {
+          const usable = source.rows.filter(row => Number.isFinite(Number(row.price)) && Number(row.price) > 0);
+          const times = usable.map(row => row.candleTime || row.updatedAt).filter(Boolean).map(value => new Date(String(value).replace(' ', 'T')).getTime()).filter(Number.isFinite);
+          const latest = times.length ? Math.max(...times) : null;
+          const ageMinutes = latest == null ? null : Math.max(0, Math.round((now - latest) / 60000));
+          return { ...source, usable: usable.length, total: source.rows.length, latest, ageMinutes, status: !usable.length ? 'NO VERIFIED DATA' : ageMinutes > 30 ? 'CHECK FRESHNESS' : 'DATA AVAILABLE' };
+        });
+        const totalUsable = checked.reduce((sum, source) => sum + source.usable, 0);
+        const totalRows = checked.reduce((sum, source) => sum + source.total, 0);
+        const newestEvent = learningJournal.filter(row => row.time).sort((a,b) => new Date(b.time) - new Date(a.time))[0];
+        const cloudLabel = cloudUser && cloudReady ? 'CLOUD SYNC ACTIVE' : cloudUser ? 'CLOUD SYNC LOADING' : 'DEVICE-ONLY MODE';
+        return <section className="panel health-dashboard">
+          <div className="panel-heading"><div><div className="eyebrow">SYSTEM STATUS · DATA INTEGRITY</div><h3>Data health & learning history</h3><p className="health-intro">A transparent check of feed availability, timestamp freshness and saved educational records. This page does not generate market forecasts.</p></div><span className="health-status-pill">{cloudLabel}</span></div>
+          <div className="health-summary">
+            <div><span>Verified quote rows</span><strong>{totalUsable} / {totalRows}</strong></div>
+            <div><span>Saved learning events</span><strong>{learningJournal.length}</strong></div>
+            <div><span>Events with entry evidence</span><strong>{learningJournal.filter(row => row.entrySnapshot).length}</strong></div>
+            <div><span>Cloud account</span><strong>{cloudUser ? 'Signed in' : 'Not signed in'}</strong></div>
+          </div>
+          <div className="health-section-title"><h4>Market-data availability</h4><span>Based on the latest records held by this browser</span></div>
+          <div className="health-feed-list">{checked.map(source => <article className="health-feed-row" key={source.name}>
+            <div><strong>{source.name}</strong><small>{source.interval} · {source.usable} usable / {source.total} saved rows</small></div>
+            <span className={source.status === 'DATA AVAILABLE' ? 'health-good' : source.status === 'CHECK FRESHNESS' ? 'health-warn' : 'health-bad'}>{source.status}</span>
+            <small>{source.latest == null ? 'No verified timestamp' : source.ageMinutes < 1 ? 'Updated less than a minute ago' : source.ageMinutes + ' min since latest candle'}</small>
+          </article>)}</div>
+          <div className="health-note"><ShieldCheck size={17}/><span><strong>Important:</strong> A saved quote is not necessarily live. Treat records older than 30 minutes as potentially stale; provider outages, market closures and API limits can all affect freshness. Missing data is never counted as a verified quote.</span></div>
+          <div className="health-section-title"><h4>Learning journal</h4><span>{cloudStatus}</span></div>
+          {!learningJournal.length ? <div className="empty-state"><strong>No learning events recorded yet</strong><p>When the app records educational session events, they will appear here.</p></div> : <>
+            <div className="health-journal-meta"><span>Latest event: <strong>{newestEvent ? new Date(newestEvent.time).toLocaleString() : '—'}</strong></span><span>Cloud status: <strong>{cloudReady ? 'Synced' : 'Local copy retained'}</strong></span></div>
+            <div className="table-wrap"><table><thead><tr><th>TIME</th><th>MODE / SYMBOL</th><th>EVENT</th><th>RESULT</th><th>RECORD QUALITY</th></tr></thead><tbody>{learningJournal.slice(0,20).map((row,index) => <tr key={row.id || index}><td>{row.time ? new Date(row.time).toLocaleString() : '—'}</td><td><strong>{row.symbol || '—'}</strong><small className="journal-stock-name">{row.mode || '—'}</small></td><td>{row.event || '—'}</td><td>{row.outcome || 'Pending'}{row.pnl == null ? '' : ' · ' + Number(row.pnl).toFixed(3)}</td><td>{row.entrySnapshot ? 'Entry evidence saved' : 'Entry evidence missing'}{row.event === 'CLOSED' || row.event === 'SELL' ? (row.exitSnapshot ? ' · Exit saved' : ' · Exit missing') : ''}{row.legacy ? ' · Older record' : ''}</td></tr>)}</tbody></table></div>
+          </>}
+          <div className="panel-footer"><span>Local records remain on this device. Sign in above to sync journal events to your private Supabase account.</span><button className="text-button" onClick={exportData}>Export learning data →</button></div>
+        </section>;
+      })()}
+
       {activeTab === 'Overview' && <section className="hour-pick-card">
         <div className="hour-pick-copy"><div className="eyebrow"><Clock3 size={13}/> ONE-HOUR AI PAPER RUN</div><h3>Test the next hour.</h3><p>Choose five stocks from the latest verified scan and measure the result after 60 minutes.</p>
         {hourSession && <div className="hour-session-status">{hourSession.completedAt ? <><strong className={hourSession.pnl >= 0 ? 'positive-text' : 'negative-text'}>{hourSession.pnl >= 0 ? '+' : '−'}R{Math.abs(hourSession.pnl).toFixed(2)}</strong><span>Final simulated P/L · {new Date(hourSession.completedAt).toLocaleString()}</span></> : <><strong>{Math.max(0, Math.ceil((new Date(hourSession.endsAt).getTime() - hourNow) / 1000 / 60))} min remaining</strong><span>Started {new Date(hourSession.startedAt).toLocaleTimeString()} · tracking 5 picks</span></>}</div>}
