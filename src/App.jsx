@@ -52,6 +52,13 @@ const GREEN_INSTRUMENTS = [
   ...RED_INSTRUMENTS.filter(item=>item.type==='Crypto').slice(0,5),
   ...RED_INSTRUMENTS.filter(item=>item.type==='Forex').slice(0,5)
 ].map(item=>({...item,marketMode:'Green'}));
+const DEMO_RUN_OPTIONS = [
+  ['NVDA','NVIDIA'],['MSFT','Microsoft'],['AAPL','Apple'],['AMZN','Amazon'],['GOOGL','Alphabet'],
+  ['META','Meta Platforms'],['TSLA','Tesla'],['AVGO','Broadcom'],['AMD','AMD'],['COST','Costco'],
+  ['NFLX','Netflix'],['ORCL','Oracle'],['PLTR','Palantir'],['INTC','Intel'],['QCOM','Qualcomm'],
+  ['JPM','JPMorgan Chase'],['WMT','Walmart'],['COIN','Coinbase'],['UBER','Uber'],['CRM','Salesforce']
+].map(([symbol,name]) => ({symbol,name}));
+
 const formatRemaining = milliseconds => {const total=Math.max(0,Math.ceil(milliseconds/1000));const h=Math.floor(total/3600),m=Math.floor((total%3600)/60),s=total%60;return h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${m}:${String(s).padStart(2,'0')}`;};
 
 const CANDIDATES = [
@@ -149,6 +156,12 @@ export default function App() {
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
   const [cloudStatus, setCloudStatus] = useState('Cloud journal not connected');
+  const [demoRunDraft, setDemoRunDraft] = useState(() => readStore('stocktrends-demo-run-draft-v1', {
+    selections: { '1 minute': '', '5 minute': '', '10 minute': '' },
+    observations: { '1 minute': '', '5 minute': '', '10 minute': '' },
+    startedAt: null, completedAt: null
+  }));
+  const [demoRunHistory, setDemoRunHistory] = useState(() => readStore('stocktrends-demo-run-history-v1', []));
 
 
   useEffect(() => {
@@ -258,6 +271,8 @@ export default function App() {
   useEffect(() => { localStorage.setItem('stocktrends-blue-stocks-v1', JSON.stringify(blueStocks)); }, [blueStocks]);
   useEffect(() => { localStorage.setItem('stocktrends-blue-trades-v1', JSON.stringify(blueTrades)); }, [blueTrades]);
   useEffect(() => { localStorage.setItem('stocktrends-learning-journal-v1', JSON.stringify(learningJournal)); }, [learningJournal]);
+  useEffect(() => { localStorage.setItem('stocktrends-demo-run-draft-v1', JSON.stringify(demoRunDraft)); }, [demoRunDraft]);
+  useEffect(() => { localStorage.setItem('stocktrends-demo-run-history-v1', JSON.stringify(demoRunHistory)); }, [demoRunHistory]);
   useEffect(() => {
     const stockEvents = trades.map(trade => ({
       id: trade.id, time: trade.time, symbol: trade.symbol, mode: 'Stock paper portfolio',
@@ -881,6 +896,81 @@ export default function App() {
     setNotice('Predictions, stock and timed paper trades, indicator snapshots, and persistent learning journal exported as JSON.');
   }
 
+  function updateDemoRun(field, interval, value) {
+    setDemoRunDraft(previous => ({
+      ...previous,
+      [field]: { ...previous[field], [interval]: value }
+    }));
+  }
+
+  function startDemoRun() {
+    setDemoRunDraft({
+      selections: { '1 minute': '', '5 minute': '', '10 minute': '' },
+      observations: { '1 minute': '', '5 minute': '', '10 minute': '' },
+      startedAt: new Date().toISOString(), completedAt: null
+    });
+    setNotice('DemoRun research session started. Choose one instrument in each interval.');
+  }
+
+  function completeDemoRun() {
+    const intervals = ['1 minute', '5 minute', '10 minute'];
+    const missing = intervals.filter(interval => !demoRunDraft.selections[interval]);
+    if (missing.length) {
+      setNotice('Please choose one option for each interval before completing the review.');
+      return;
+    }
+    setDemoRunDraft(previous => ({ ...previous, completedAt: new Date().toISOString() }));
+    setNotice('Review completed. Check the session summary, then use Learn & Save to preserve it.');
+  }
+
+  function learnAndSaveDemoRun() {
+    if (!demoRunDraft.completedAt) return;
+    const intervals = ['1 minute', '5 minute', '10 minute'];
+    const id = `demorun-${Date.now()}`;
+    const savedAt = new Date().toISOString();
+    const selections = intervals.map(interval => {
+      const instrument = DEMO_RUN_OPTIONS.find(item => item.symbol === demoRunDraft.selections[interval]);
+      return {
+        interval, symbol: instrument?.symbol || demoRunDraft.selections[interval],
+        name: instrument?.name || '', observation: demoRunDraft.observations[interval] || ''
+      };
+    });
+    const notesCount = selections.filter(item => item.observation.trim()).length;
+    const learningSummary = `DemoRun review saved with ${selections.length} interval selections and ${notesCount} written observations. This is a record of what was observed, not model training or a trading recommendation.`;
+    const record = {
+      id, startedAt: demoRunDraft.startedAt, completedAt: demoRunDraft.completedAt,
+      savedAt, dataType: 'manual educational observations', selections, learningSummary
+    };
+    setDemoRunHistory(previous => [record, ...previous]);
+    setLearningJournal(previous => [
+      ...selections.map((item, index) => ({
+        id: `${id}-${index}`, time: savedAt, symbol: item.symbol,
+        mode: 'DemoRun educational review', event: 'LEARNED',
+        outcome: 'OBSERVATION SAVED',
+        reason: item.observation || 'No written observation supplied.',
+        entrySnapshot: { interval: item.interval, name: item.name, source: 'user-selected educational review', dataType: 'manual observation' },
+        exitSnapshot: null, legacy: false
+      })),
+      ...previous
+    ]);
+    const backup = {
+      backupType: 'Stocktrends DemoRun learning backup',
+      schemaVersion: 1, exportedAt: savedAt, session: record,
+      allDemoRunSessions: [record, ...demoRunHistory]
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = `stocktrends-dem orun-${new Date(savedAt).toISOString().slice(0,10)}.json`.replace('dem orun','demorun');
+    anchor.click(); URL.revokeObjectURL(url);
+    setDemoRunDraft({
+      selections: { '1 minute': '', '5 minute': '', '10 minute': '' },
+      observations: { '1 minute': '', '5 minute': '', '10 minute': '' },
+      startedAt: null, completedAt: null
+    });
+    setNotice('DemoRun learning record saved on this device and backup downloaded. Cloud journal sync will run when signed in.');
+  }
+
   const nav = [
     { name: 'Overview', icon: LayoutDashboard }, { name: 'Watchlist', icon: Eye },
     { name: 'Paper trading', icon: Wallet }, { name: 'Performance', icon: BarChart3 },
@@ -897,6 +987,7 @@ export default function App() {
       <button className={`nav-item red-review-nav-item ${activeTab === 'Red Review' ? 'active' : ''}`} onClick={() => setActiveTab('Red Review')}><BrainCircuit size={18}/>Review</button>
       <button className={`nav-item green-nav-item ${activeTab === 'Green Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Green Dashboard')}><Activity size={18}/>Green</button>
       <button className={`nav-item black-nav-item ${activeTab === 'Black Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Black Dashboard')}><BrainCircuit size={18}/>Black</button>
+      <button className={`nav-item demorun-nav-item ${activeTab === 'DemoRun' ? 'active' : ''}`} onClick={() => setActiveTab('DemoRun')}><BookOpen size={18}/>DemoRun</button>
       {nav.map(({ name, icon: Icon }) => <button key={name} className={`nav-item ${activeTab === name ? 'active' : ''}`} onClick={() => setActiveTab(name)}><Icon size={18} />{name}</button>)}
       <div className="sidebar-bottom"><div className="status-dot" /><span>Paper research mode</span><span className="version">v0.2</span></div>
     </aside>
@@ -968,6 +1059,39 @@ export default function App() {
           <p className="red-disclaimer">Historical paper-research only. The optimisation score measures data coverage and analysis breadth, not a probability of profit. Patterns are correlations, can overfit, and must be validated on unseen data before being used to change trading rules. No orders are placed and no profit is guaranteed. Review time: {new Date(redReview.reviewedAt).toLocaleString()}.</p>
         </>}
       </section>}
+
+      {activeTab === 'DemoRun' && (() => {
+        const intervals = ['1 minute', '5 minute', '10 minute'];
+        const selectedCount = intervals.filter(interval => demoRunDraft.selections[interval]).length;
+        const completed = Boolean(demoRunDraft.completedAt);
+        return <section className="panel demorun-dashboard">
+          <div className="panel-heading"><div><div className="eyebrow">DEMORUN · EDUCATIONAL MARKET REVIEW</div><h3>Three interval research session</h3><p className="demorun-intro">Choose one instrument from each 20-option list, record what you observe, complete the review and save a learning backup.</p></div><span className="demorun-badge">20 × 3 OPTIONS</span></div>
+          <div className="demorun-actions"><button className="primary-button" onClick={startDemoRun}><RotateCcw size={15}/>{demoRunDraft.startedAt && !completed ? 'Restart session' : 'Start DemoRun'}</button><span>{demoRunDraft.startedAt ? 'Started ' + new Date(demoRunDraft.startedAt).toLocaleString() : 'No active session'}</span></div>
+          <div className="demorun-grid">{intervals.map(interval => <article className="demorun-interval" key={interval}>
+            <div className="demorun-interval-head"><div><div className="eyebrow">RESEARCH WINDOW</div><h4>{interval}</h4></div><span className="count-pill">{DEMO_RUN_OPTIONS.length} options</span></div>
+            <label className="demorun-label" htmlFor={`demorun-${interval}`}>Choose one instrument</label>
+            <select id={`demorun-${interval}`} value={demoRunDraft.selections[interval]} disabled={!demoRunDraft.startedAt || completed} onChange={event => updateDemoRun('selections', interval, event.target.value)}>
+              <option value="">Select an option…</option>
+              {DEMO_RUN_OPTIONS.map(item => <option key={item.symbol} value={item.symbol}>{item.symbol} — {item.name}</option>)}
+            </select>
+            <label className="demorun-label" htmlFor={`demorun-note-${interval}`}>What did you observe?</label>
+            <textarea id={`demorun-note-${interval}`} rows="3" maxLength="500" placeholder="Record a factual observation, data issue or question…" value={demoRunDraft.observations[interval]} disabled={!demoRunDraft.startedAt || completed} onChange={event => updateDemoRun('observations', interval, event.target.value)} />
+            <small>{demoRunDraft.selections[interval] ? 'Selected: ' + demoRunDraft.selections[interval] : 'No instrument selected yet'}</small>
+          </article>)}</div>
+          <div className="demorun-session-summary">
+            <div><span>Options selected</span><strong>{selectedCount} / 3</strong></div>
+            <div><span>Intervals reviewed</span><strong>{completed ? '3 / 3' : 'In progress'}</strong></div>
+            <div><span>Saved sessions</span><strong>{demoRunHistory.length}</strong></div>
+            <div><span>Written observations</span><strong>{intervals.filter(interval => demoRunDraft.observations[interval].trim()).length}</strong></div>
+          </div>
+          {!completed ? <button className="primary-button demorun-complete" disabled={!demoRunDraft.startedAt || selectedCount !== 3} onClick={completeDemoRun}>Complete review</button> :
+            <div className="demorun-completed"><strong>Review completed</strong><p>Selected instruments and notes are ready to be preserved. This session does not calculate monetary profit/loss or make trading decisions.</p><button className="primary-button" onClick={learnAndSaveDemoRun}><BookOpen size={15}/>Learn & Save + Download Backup</button></div>}
+          <div className="health-note"><ShieldCheck size={17}/><span><strong>Data and learning limits:</strong> DemoRun stores your selections and written observations. It does not execute trades, calculate profit/loss, train an AI model, or treat sample prices as verified market results. Sign in to the Cloud Learning Journal above to sync saved learning events.</span></div>
+          <div className="panel-heading demorun-history-heading"><div><div className="eyebrow">SAVED REFERENCE</div><h3>DemoRun learning history</h3></div><span className="count-pill">{demoRunHistory.length}</span></div>
+          {!demoRunHistory.length ? <div className="empty-state"><strong>No DemoRun backups yet</strong><p>Complete a review and press Learn & Save to create the first record.</p></div> : <div className="demorun-history">{demoRunHistory.slice(0,15).map(record => <article key={record.id}><div><strong>{new Date(record.savedAt).toLocaleString()}</strong><small>{record.selections.map(item => item.interval + ': ' + item.symbol).join(' · ')}</small><p>{record.learningSummary}</p></div><span className="health-good">SAVED</span></article>)}</div>}
+          <div className="panel-footer"><span>Saved locally; learning events sync to Supabase when signed in.</span><button className="text-button" onClick={exportData}>Export full app history →</button></div>
+        </section>;
+      })()}
 
       {activeTab === 'Data health' && (() => {
         const sources = [
