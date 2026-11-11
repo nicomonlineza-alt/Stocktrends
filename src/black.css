@@ -59,3 +59,21 @@
 @media(max-width:900px){.black-stock-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:620px){.black-only-topbar{height:66px;padding:0 14px}.black-only-topbar .brand{font-size:17px}.black-only-topbar .brand-mark{width:36px;height:36px}.black-only-badge{font-size:8px}.black-only-main{padding:16px 10px}.black-dashboard{padding:15px;border-radius:13px}.black-head{display:block}.black-head h1{font-size:25px}.black-label{display:inline-block;margin-top:12px}.black-options{grid-template-columns:repeat(3,minmax(0,1fr))}.black-picker-head{align-items:flex-start;flex-direction:column}.black-stock-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.black-picker-actions{align-items:stretch;flex-direction:column}.black-load{width:100%}.black-results{grid-template-columns:1fr}.black-data-grid{gap:5px}.black-data-grid>div{padding:7px}.black-result-foot{flex-direction:column;gap:4px}}
 @media(prefers-reduced-motion:reduce){.black-dashboard *{animation:none!important;transition:none!important}}
+
+.black-diagnostics{padding:18px 19px;margin:0 0 17px;border:1px solid rgba(97,228,210,.2);border-radius:14px;background:linear-gradient(120deg,rgba(97,228,210,.055),rgba(255,255,255,.018))}
+.black-diagnostics-head{display:flex;align-items:center;justify-content:space-between;gap:15px}
+.black-diagnostics-head h2{margin:5px 0;color:#f2f6fd;font:600 19px 'Space Grotesk',sans-serif}
+.black-diagnostics-head p{max-width:720px;margin:0;color:#aab6c9;font-size:11px;line-height:1.6}
+.black-diagnostic-button{padding:11px 14px;border:1px solid #83f1ce;border-radius:9px;background:linear-gradient(120deg,#83f1ce,#65d6d2);color:#071713;font-size:10px;font-weight:800;white-space:nowrap}
+.black-diagnostic-button:disabled{opacity:.5;cursor:wait}
+.black-diagnostic-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:14px}
+.black-diagnostic-card{min-width:0;padding:10px;border:1px solid rgba(169,185,220,.12);border-radius:9px;background:rgba(8,13,22,.48)}
+.black-diagnostic-card>div{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-bottom:9px}
+.black-diagnostic-card b{color:#eaf2fa;font-size:11px}
+.black-diagnostic-card small{display:block;margin-top:5px;color:#91a0b5;font-size:9px;line-height:1.45;overflow-wrap:anywhere}
+.black-diagnostic-card p{margin:0;color:#e7b0b5;font-size:9px;line-height:1.5;overflow-wrap:anywhere}
+.diagnostic-ok,.diagnostic-fail{font-size:8px;font-weight:900;letter-spacing:.5px}
+.diagnostic-ok{color:#8ce1bc}.diagnostic-fail{color:#e6a6ad}
+.black-diagnostic-note{margin:12px 0 0;color:#7e8ba0;font-size:9px;line-height:1.55}
+@media(max-width:900px){.black-diagnostic-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:620px){.black-diagnostics-head{align-items:stretch;flex-direction:column}.black-diagnostic-button{width:100%}.black-diagnostic-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
