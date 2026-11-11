@@ -112,6 +112,11 @@ export default function BlackDashboard(){
     return ()=>clearInterval(timer);
   },[aiSession]);
   useEffect(()=>{
+    if(!aiSession||aiSession.status!=='running')return;
+    const timer=setInterval(()=>refreshAiSnapshot(aiSession),60000);
+    return ()=>clearInterval(timer);
+  },[aiSession?.id,aiSession?.status]);
+  useEffect(()=>{
     if(aiSession?.status==='running'&&Date.now()>=aiSession.endsAt)finishAiSession(aiSession);
   },[secondsLeft]);
   const filtered=useMemo(()=>ASSETS.filter(a=>(a.symbol+' '+a.name).toLowerCase().includes(search.toLowerCase())),[search]);
@@ -146,6 +151,26 @@ export default function BlackDashboard(){
     return {symbol,name:ASSETS.find(a=>a.symbol===symbol)?.name||symbol,price:Number(latest.close),lastUpdated:latest.datetime,indicators,score:scoreObservation(indicators)};
   }
 
+  async function refreshAiSnapshot(session){
+    if(!session||session.status!=='running'||Date.now()>=session.endsAt)return;
+    const values=[];
+    for(const stock of session.stocks){
+      try{
+        const latest=await fetchOneMinute(stock.symbol);
+        values.push({symbol:stock.symbol,price:latest.price,change:stock.price?((latest.price-stock.price)/stock.price)*100:null});
+      }catch(error){values.push({symbol:stock.symbol,error:error.message,change:null});}
+    }
+    const elapsed=Math.min(300,Math.max(0,Math.round((Date.now()-new Date(session.startedAt).getTime())/1000)));
+    const average=values.filter(row=>Number.isFinite(row.change));
+    const point={elapsed,label:Math.floor(elapsed/60)+':'+String(elapsed%60).padStart(2,'0'),values,averageChange:average.length?average.reduce((sum,row)=>sum+row.change,0)/average.length:null};
+    setAiSession(current=>{
+      if(!current||current.id!==session.id||current.status!=='running')return current;
+      const points=current.chartPoints||[];
+      if(points.some(item=>item.elapsed===elapsed))return current;
+      return {...current,chartPoints:[...points,point].sort((a,b)=>a.elapsed-b.elapsed)};
+    });
+  }
+
   async function startAiSuggestions(){
     if(aiBusy||aiSession?.status==='running')return;
     setAiBusy(true);setAiMessage('Scanning a small, predefined watchlist using historical one-minute data…');
@@ -156,7 +181,8 @@ export default function BlackDashboard(){
     }
     const ranked=candidates.filter(row=>!row.error).sort((a,b)=>b.score-a.score).slice(0,5);
     if(ranked.length<5){setAiMessage('Only '+ranked.length+' stocks returned enough data. No five-stock session was started. Try again later.');setAiBusy(false);return;}
-    const session={id:Date.now(),status:'running',startedAt:new Date().toISOString(),endsAt:Date.now()+300000,stocks:ranked.map(row=>({...row}))};
+    const startedAt=new Date().toISOString();
+    const session={id:Date.now(),status:'running',startedAt,endsAt:Date.now()+300000,stocks:ranked.map(row=>({...row})),chartPoints:[{elapsed:0,label:'0:00',values:ranked.map(row=>({symbol:row.symbol,price:row.price,change:0})),averageChange:0}]};
     setAiSession(session);setSecondsLeft(300);setAiMessage('Five stocks selected. The app is now observing them for five minutes; no orders are placed.');
     setAiBusy(false);
   }
@@ -172,9 +198,14 @@ export default function BlackDashboard(){
         outcomes.push({symbol:start.symbol,startPrice:start.price,endPrice:latest.price,change,initialScore:start.score,finalScore:latest.score,lastUpdated:latest.lastUpdated});
       }catch(error){outcomes.push({symbol:start.symbol,error:error.message,initialScore:start.score});}
     }
-    const entry={id:session.id,type:'ai-suggestions',createdAt:session.startedAt,completedAt:new Date().toISOString(),durationMinutes:5,stocks:outcomes,method:'One-minute historical indicators ranked a fixed watchlist; five-minute observation only.'};
+    const elapsed=300;
+    const finalValues=outcomes.map(row=>({symbol:row.symbol,price:row.endPrice,change:row.change,error:row.error}));
+    const validFinal=finalValues.filter(row=>Number.isFinite(row.change));
+    const finalPoint={elapsed,label:'5:00',values:finalValues,averageChange:validFinal.length?validFinal.reduce((sum,row)=>sum+row.change,0)/validFinal.length:null};
+    const chartPoints=[...(session.chartPoints||[]).filter(point=>point.elapsed!==300),finalPoint];
+    const entry={id:session.id,type:'ai-suggestions',createdAt:session.startedAt,completedAt:new Date().toISOString(),durationMinutes:5,stocks:outcomes,chartPoints,method:'One-minute historical indicators ranked a fixed watchlist; five-minute paper observation only.'};
     saveLearning(entry);
-    setAiSession({...session,status:'complete',outcomes});
+    setAiSession({...session,status:'complete',outcomes,chartPoints});
     setAiMessage('AI Suggestions session completed. Results were saved to the learning journal on this device.');
     setAiBusy(false);setSecondsLeft(0);
   }
@@ -256,8 +287,33 @@ export default function BlackDashboard(){
         <button className="black-load" onClick={startAiSuggestions} disabled={aiBusy||aiSession?.status==='running'}>{aiBusy?'Scanning…':'Start AI Suggestions'}</button>
         <button className="black-learn-button" onClick={learnFromCurrent} disabled={aiBusy}>Learn from loaded observations</button>
       </div>
-      {aiSession?.status==='running'&&<div className="black-ai-status"><b>Observation in progress</b><strong>{Math.floor(secondsLeft/60)}:{String(secondsLeft%60).padStart(2,'0')}</strong><p>Five selected stocks · five-minute window · no trades or orders.</p><div className="black-ai-stock-row">{aiSession.stocks.map(row=><span key={row.symbol}>{row.symbol} · score {row.score}/8</span>)}</div></div>}
-      {aiSession?.status==='complete'&&<div className="black-ai-status"><b>Latest five-minute observation</b><div className="black-ai-outcomes">{aiSession.outcomes?.map(row=><span key={row.symbol}>{row.symbol}: {row.error?'Data unavailable':pct(row.change)}</span>)}</div></div>}
+      {aiSession&&<div className="black-ai-status">
+        <b>{aiSession.status==='running'?'Observation in progress':'Five-minute observation complete'}</b>
+        {aiSession.status==='running'&&<strong>{Math.floor(secondsLeft/60)}:{String(secondsLeft%60).padStart(2,'0')}</strong>}
+        <p>Five selected stocks · paper-only price tracking · no orders. The chart refreshes about once per minute when provider data is available.</p>
+        <div className="black-ai-stock-row">{aiSession.stocks.map(row=><span key={row.symbol}>{row.symbol} · score {row.score}/8</span>)}</div>
+        <div className="black-pnl-chart">
+          <div className="black-pnl-chart-head"><b>Live simulated P&amp;L tracker</b><span>Change from starting price (%)</span></div>
+          <svg viewBox="0 0 640 260" role="img" aria-label="Line chart showing percentage price changes for five selected stocks during the five-minute observation">
+            {[0,1,2,3,4].map(i=><g key={i}><line x1="48" x2="620" y1={24+i*48} y2={24+i*48} className="pnl-grid-line"/><text x="40" y={28+i*48} textAnchor="end" className="pnl-axis-label">{(2-i).toFixed(1)}%</text></g>)}
+            {[0,60,120,180,240,300].map((sec,i)=><g key={sec}><line x1={48+i*114.4} x2={48+i*114.4} y1="20" y2="216" className="pnl-grid-line"/><text x={48+i*114.4} y="238" textAnchor="middle" className="pnl-axis-label">{Math.floor(sec/60)}:{String(sec%60).padStart(2,'0')}</text></g>)}
+            {aiSession.stocks.map((stock,index)=>{
+              const color=['#71e5c6','#65b8ff','#f6c66b','#c29aff','#ff8b9b'][index];
+              const points=(aiSession.chartPoints||[]).map(point=>({x:48+(point.elapsed/300)*572,y:120-(Math.max(-2,Math.min(2,point.values.find(v=>v.symbol===stock.symbol)?.change??0))*48)}));
+              const path=points.map((point,i)=>(i?'L':'M')+point.x+','+point.y).join(' ');
+              return <g key={stock.symbol}><path d={path} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>{points.map((point,i)=><circle key={i} cx={point.x} cy={point.y} r="3" fill={color}/>)}</g>;
+            })}
+            <line x1="48" x2="620" y1="120" y2="120" className="pnl-zero-line"/>
+          </svg>
+          <div className="black-pnl-legend">{aiSession.stocks.map((stock,index)=><span key={stock.symbol}><i style={{background:['#71e5c6','#65b8ff','#f6c66b','#c29aff','#ff8b9b'][index]}}/>{stock.symbol}</span>)}</div>
+          <div className="black-pnl-current">{aiSession.stocks.map(stock=>{
+            const latest=[...(aiSession.chartPoints||[])].at(-1)?.values.find(value=>value.symbol===stock.symbol);
+            return <span key={stock.symbol}><small>{stock.symbol}</small><b>{latest&&Number.isFinite(latest.change)?pct(latest.change):'—'}</b></span>;
+          })}</div>
+          <p className="black-indicator-note">This graph plots observed percentage price movement from each stock's starting snapshot. It is not an executed trade or a cash profit/loss figure. Historical provider candles can be delayed; the vertical scale is capped at ±2% for readability.</p>
+        </div>
+        {aiSession.status==='complete'&&<div className="black-ai-outcomes">{aiSession.outcomes?.map(row=><span key={row.symbol}>{row.symbol}: {row.error?'Data unavailable':pct(row.change)}</span>)}</div>}
+      </div>}
       {aiMessage&&<p className="black-ai-message" role="status">{aiMessage}</p>}
       <div className="black-learning-summary"><b>Learning journal</b><span>{learning.length} saved session(s) on this device</span></div>
       {learning.slice(0,5).map(entry=><div className="black-learning-entry" key={entry.id}><span>{entry.type==='ai-suggestions'?'AI Suggestions':'Manual learning'} · {new Date(entry.createdAt).toLocaleString()}</span><small>{entry.stocks?.map(row=>row.symbol).join(', ')}</small></div>)}
