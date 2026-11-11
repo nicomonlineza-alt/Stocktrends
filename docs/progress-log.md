@@ -33,3 +33,13 @@
 1. Run `npm install` and `npm run build` in a project environment; fix any compile issues before adding new features.
 2. Integrate Twelve Data through a server-side endpoint with secrets held in environment variables.
 3. Replace manual outcome marking with verified, timestamped outcome evaluation and persistent prediction storage.
+
+
+## 2026-11-11 — Market-data connection diagnostics
+- Audited the current Black dashboard, server-side market-data endpoint, provider environment-variable names, and latest production deployment.
+- Confirmed that the Vercel project has production entries for FINNHUB_API_KEY and TWELVE_DATA_API_KEY; secret values were not retrieved or exposed.
+- Confirmed that the latest production deployment is READY and points to the current main-branch Black observatory commit.
+- Added an in-app five-timeframe connection check using AAPL historical candles. It reports the provider, candle count, latest candle timestamp, or the exact provider error for each timeframe.
+- The 3-hour view is explicitly identified as a grouped view derived from hourly candles; it is not a native 3-hour provider interval.
+- The diagnostic is a historical-data connectivity check only. It does not claim real-time quote access or prediction accuracy.
+- Next: run the diagnostic in the deployed app, resolve provider access or rate-limit issues, then implement transparent indicator calculations against verified candles.
