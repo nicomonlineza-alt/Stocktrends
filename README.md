@@ -47,3 +47,10 @@ The `.env.example` file documents the required variable name only; it does not c
 5. Keep the app in educational observation and simulated mode; no brokerage connection or real-money execution.
 
 See [PROJECT_PLAN.md](./PROJECT_PLAN.md), [STRATEGY.md](./STRATEGY.md), and [docs/progress-log.md](./docs/progress-log.md).
+
+
+## Black market observatory — indicator milestone
+
+The Black workspace now retrieves up to 60 historical candles per selected company for the 1-minute, 5-minute, 15-minute, and 1-hour views. Its 3-hour view requests up to 100 hourly candles and groups complete sets of three consecutive hourly candles. The dashboard calculates and displays RSI(14), EMA 9, EMA 21, MACD (12/26) with its 9-period signal and histogram when enough history is available, relative volume against the prior 20 candles, and a comparison of the latest five-candle move with the preceding five-candle move.
+
+These calculations are descriptive historical measurements only. They are not recommendations, forecasts, trade entries, or proof of a profitable strategy. The 3-hour groups are locally assembled and may not align with official exchange session boundaries. Missing volume or insufficient history is shown as unavailable rather than filled with estimated values.
