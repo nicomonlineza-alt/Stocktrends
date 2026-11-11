@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Activity, Clock3, RefreshCw, Search, BarChart3 } from 'lucide-react';
 import './black.css';
 
@@ -21,6 +21,8 @@ const DURATIONS = [
   {label:'3 Hour',interval:'1h',bars:100,aggregate:3,description:'Three-hour view, grouped from hourly candles'}
 ];
 
+const LEARNING_KEY='stocktrends-ai-suggestions-learning-v1';
+const SCAN_UNIVERSE=['NVDA','MSFT','AAPL','AMZN','GOOGL','META','TSLA','AVGO','AMD','NFLX'];
 const fmt=(v)=>v==null||v===''||!Number.isFinite(Number(v))?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const pct=(v)=>Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+Number(v).toFixed(2)+'%':'—';
 
@@ -75,6 +77,20 @@ const calculateIndicators=(candles)=>{
   };
 };
 
+
+const scoreObservation=(indicators)=>{
+  let score=0;
+  if(indicators.ema9!=null&&indicators.ema21!=null)score+=indicators.ema9>indicators.ema21?2:0;
+  if(indicators.macdHistogram!=null)score+=indicators.macdHistogram>0?2:0;
+  if(indicators.rsi14!=null)score+=indicators.rsi14>=45&&indicators.rsi14<=65?2:indicators.rsi14>65&&indicators.rsi14<70?1:0;
+  if(indicators.relativeVolume!=null)score+=indicators.relativeVolume>=1?1:0;
+  if(indicators.lastFive!=null)score+=indicators.lastFive>0?1:0;
+  return score;
+};
+const readLearning=()=>{
+  try{return JSON.parse(localStorage.getItem(LEARNING_KEY)||'[]');}catch{return [];}
+};
+
 export default function BlackDashboard(){
   const [duration,setDuration]=useState(DURATIONS[0]);
   const [selected,setSelected]=useState(['NVDA','MSFT','AAPL']);
@@ -85,12 +101,83 @@ export default function BlackDashboard(){
   const [updatedAt,setUpdatedAt]=useState(null);
   const [diagnostics,setDiagnostics]=useState([]);
   const [diagnosticsBusy,setDiagnosticsBusy]=useState(false);
+  const [learning,setLearning]=useState(()=>readLearning());
+  const [aiBusy,setAiBusy]=useState(false);
+  const [aiSession,setAiSession]=useState(null);
+  const [aiMessage,setAiMessage]=useState('');
+  const [secondsLeft,setSecondsLeft]=useState(0);
+  useEffect(()=>{
+    if(!aiSession||aiSession.status!=='running')return;
+    const timer=setInterval(()=>setSecondsLeft(Math.max(0,Math.ceil((aiSession.endsAt-Date.now())/1000))),1000);
+    return ()=>clearInterval(timer);
+  },[aiSession]);
+  useEffect(()=>{
+    if(aiSession?.status==='running'&&Date.now()>=aiSession.endsAt)finishAiSession(aiSession);
+  },[secondsLeft]);
   const filtered=useMemo(()=>ASSETS.filter(a=>(a.symbol+' '+a.name).toLowerCase().includes(search.toLowerCase())),[search]);
 
   function toggle(symbol){
     setSelected(old=>old.includes(symbol)?old.filter(s=>s!==symbol):old.length>=8?old:[...old,symbol]);
   }
 
+
+
+  function saveLearning(entry){
+    const next=[entry,...readLearning()].slice(0,100);
+    localStorage.setItem(LEARNING_KEY,JSON.stringify(next));
+    setLearning(next);
+  }
+
+  function learnFromCurrent(){
+    const valid=observations.filter(row=>!row.error&&row.indicators);
+    if(!valid.length){setAiMessage('Load market observations first. There is no verified data to learn from yet.');return;}
+    const entry={id:Date.now(),type:'manual',createdAt:new Date().toISOString(),timeframe:duration.label,stocks:valid.map(row=>({symbol:row.symbol,score:scoreObservation(row.indicators),movement:row.movement,indicators:row.indicators})),note:'Saved indicator snapshot for later educational comparison.'};
+    saveLearning(entry);
+    setAiMessage('Learning snapshot saved on this device for '+valid.length+' stocks.');
+  }
+
+  async function fetchOneMinute(symbol){
+    const response=await fetch('/api/market-data?symbol='+encodeURIComponent(symbol)+'&interval=1min&outputsize=60');
+    const payload=await response.json();
+    if(!response.ok||!Array.isArray(payload.candles)||payload.candles.length<26)throw new Error(payload.error||'Insufficient one-minute history');
+    const rows=[...payload.candles].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime)));
+    const indicators=calculateIndicators(rows);
+    const latest=rows.at(-1);
+    return {symbol,name:ASSETS.find(a=>a.symbol===symbol)?.name||symbol,price:Number(latest.close),lastUpdated:latest.datetime,indicators,score:scoreObservation(indicators)};
+  }
+
+  async function startAiSuggestions(){
+    if(aiBusy||aiSession?.status==='running')return;
+    setAiBusy(true);setAiMessage('Scanning a small, predefined watchlist using historical one-minute data…');
+    const candidates=[];
+    for(const symbol of SCAN_UNIVERSE){
+      try{candidates.push(await fetchOneMinute(symbol));}
+      catch(error){candidates.push({symbol,error:error.message});}
+    }
+    const ranked=candidates.filter(row=>!row.error).sort((a,b)=>b.score-a.score).slice(0,5);
+    if(ranked.length<5){setAiMessage('Only '+ranked.length+' stocks returned enough data. No five-stock session was started. Try again later.');setAiBusy(false);return;}
+    const session={id:Date.now(),status:'running',startedAt:new Date().toISOString(),endsAt:Date.now()+300000,stocks:ranked.map(row=>({...row}))};
+    setAiSession(session);setSecondsLeft(300);setAiMessage('Five stocks selected. The app is now observing them for five minutes; no orders are placed.');
+    setAiBusy(false);
+  }
+
+  async function finishAiSession(session){
+    if(aiBusy||session.status!=='running')return;
+    setAiBusy(true);setAiMessage('Five minutes complete. Checking the latest observations…');
+    const outcomes=[];
+    for(const start of session.stocks){
+      try{
+        const latest=await fetchOneMinute(start.symbol);
+        const change=start.price?((latest.price-start.price)/start.price)*100:null;
+        outcomes.push({symbol:start.symbol,startPrice:start.price,endPrice:latest.price,change,initialScore:start.score,finalScore:latest.score,lastUpdated:latest.lastUpdated});
+      }catch(error){outcomes.push({symbol:start.symbol,error:error.message,initialScore:start.score});}
+    }
+    const entry={id:session.id,type:'ai-suggestions',createdAt:session.startedAt,completedAt:new Date().toISOString(),durationMinutes:5,stocks:outcomes,method:'One-minute historical indicators ranked a fixed watchlist; five-minute observation only.'};
+    saveLearning(entry);
+    setAiSession({...session,status:'complete',outcomes});
+    setAiMessage('AI Suggestions session completed. Results were saved to the learning journal on this device.');
+    setAiBusy(false);setSecondsLeft(0);
+  }
 
   async function runDiagnostics(){
     if(diagnosticsBusy)return;
@@ -160,6 +247,23 @@ export default function BlackDashboard(){
       <p className="black-diagnostic-note">A successful check confirms historical candles can be retrieved; it does not guarantee real-time quotes, uninterrupted provider access, or forecast accuracy.</p>
     </div>
 
+
+    <div className="black-ai-learning">
+      <div className="eyebrow">AI SUGGESTIONS · FIVE-MINUTE OBSERVATION</div>
+      <h2>AI Suggestions</h2>
+      <p>Automatically screens a limited watchlist, selects five stocks using the same transparent indicator rules, then observes their recorded prices for five minutes. This is a paper-only learning experiment, not investment advice or a prediction of profit.</p>
+      <div className="black-ai-actions">
+        <button className="black-load" onClick={startAiSuggestions} disabled={aiBusy||aiSession?.status==='running'}>{aiBusy?'Scanning…':'Start AI Suggestions'}</button>
+        <button className="black-learn-button" onClick={learnFromCurrent} disabled={aiBusy}>Learn from loaded observations</button>
+      </div>
+      {aiSession?.status==='running'&&<div className="black-ai-status"><b>Observation in progress</b><strong>{Math.floor(secondsLeft/60)}:{String(secondsLeft%60).padStart(2,'0')}</strong><p>Five selected stocks · five-minute window · no trades or orders.</p><div className="black-ai-stock-row">{aiSession.stocks.map(row=><span key={row.symbol}>{row.symbol} · score {row.score}/8</span>)}</div></div>}
+      {aiSession?.status==='complete'&&<div className="black-ai-status"><b>Latest five-minute observation</b><div className="black-ai-outcomes">{aiSession.outcomes?.map(row=><span key={row.symbol}>{row.symbol}: {row.error?'Data unavailable':pct(row.change)}</span>)}</div></div>}
+      {aiMessage&&<p className="black-ai-message" role="status">{aiMessage}</p>}
+      <div className="black-learning-summary"><b>Learning journal</b><span>{learning.length} saved session(s) on this device</span></div>
+      {learning.slice(0,5).map(entry=><div className="black-learning-entry" key={entry.id}><span>{entry.type==='ai-suggestions'?'AI Suggestions':'Manual learning'} · {new Date(entry.createdAt).toLocaleString()}</span><small>{entry.stocks?.map(row=>row.symbol).join(', ')}</small></div>)}
+      <p className="black-indicator-note">The journal stores snapshots and observed outcomes locally in this browser. It does not train a predictive model or prove a strategy is profitable; past five-minute movement can be noise.</p>
+    </div>
+
     <div className="black-duration">
       <div className="eyebrow">01 · CHOOSE A TIMEFRAME</div>
       <div className="black-options">{DURATIONS.map(d=><button key={d.label} className={duration.label===d.label?'chosen':''} onClick={()=>setDuration(d)}>{d.label}</button>)}</div>
@@ -198,6 +302,6 @@ export default function BlackDashboard(){
           </div>
         </>}
       </article>)}</div>}
-    <p className="black-disclaimer">Educational observation only. Historical movement and technical indicators are descriptive, not predictions or buy/sell signals. Data availability and delays depend on the connected market-data provider. No trade-finding, simulated profit targets, or broker orders are included.</p>
+    <p className="black-disclaimer">Educational observation only. Historical movement and technical indicators are descriptive, not predictions or buy/sell signals. Data availability and delays depend on the connected market-data provider. AI Suggestions is a five-minute paper observation only. No broker connection, real-money trading, or guaranteed-profit claim is included.</p>
   </section>;
 }
