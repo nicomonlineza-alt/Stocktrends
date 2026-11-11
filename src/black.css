@@ -77,3 +77,17 @@
 .black-diagnostic-note{margin:12px 0 0;color:#7e8ba0;font-size:9px;line-height:1.55}
 @media(max-width:900px){.black-diagnostic-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:620px){.black-diagnostics-head{align-items:stretch;flex-direction:column}.black-diagnostic-button{width:100%}.black-diagnostic-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+
+.black-indicators{margin-top:14px;padding-top:12px;border-top:1px solid rgba(169,185,220,.12)}
+.black-indicators-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
+.black-indicators-title b{color:#dce8f4;font-size:11px}
+.black-indicators-title span{color:#7f93aa;font-size:9px}
+.black-indicator-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
+.black-indicator-grid>div{min-width:0;padding:9px;border:1px solid rgba(169,185,220,.1);border-radius:8px;background:rgba(255,255,255,.025)}
+.black-indicator-grid small,.black-indicator-grid b,.black-indicator-grid em{display:block;overflow-wrap:anywhere}
+.black-indicator-grid small{color:#8192a8;font-size:9px}
+.black-indicator-grid b{margin-top:5px;color:#e8f1fa;font-size:12px;font-weight:700}
+.black-indicator-grid em{margin-top:4px;color:#7f93aa;font-size:8px;font-style:normal;line-height:1.4}
+.black-indicator-note{margin:10px 0 0;color:#7f8da2;font-size:9px;line-height:1.55}
+@media(max-width:620px){.black-indicator-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.black-indicators-title{align-items:flex-start;flex-direction:column}}
