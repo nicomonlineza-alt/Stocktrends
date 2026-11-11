@@ -32,10 +32,35 @@ export default function BlackDashboard(){
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [updatedAt,setUpdatedAt]=useState(null);
+  const [diagnostics,setDiagnostics]=useState([]);
+  const [diagnosticsBusy,setDiagnosticsBusy]=useState(false);
   const filtered=useMemo(()=>ASSETS.filter(a=>(a.symbol+' '+a.name).toLowerCase().includes(search.toLowerCase())),[search]);
 
   function toggle(symbol){
     setSelected(old=>old.includes(symbol)?old.filter(s=>s!==symbol):old.length>=8?old:[...old,symbol]);
+  }
+
+
+  async function runDiagnostics(){
+    if(diagnosticsBusy)return;
+    setDiagnosticsBusy(true);
+    setDiagnostics([]);
+    const checks=[];
+    for(const timeframe of DURATIONS){
+      try{
+        const response=await fetch('/api/market-data?symbol=AAPL&interval='+timeframe.interval+'&outputsize=21');
+        const payload=await response.json();
+        if(!response.ok||!Array.isArray(payload.candles)||payload.candles.length<21){
+          throw new Error(payload.error||'Provider returned fewer than 21 valid candles.');
+        }
+        const latest=[...payload.candles].sort((x,y)=>String(x.datetime).localeCompare(String(y.datetime))).at(-1);
+        checks.push({label:timeframe.label,ok:true,source:payload.source||'Market data provider',count:payload.candles.length,last:latest.datetime,detail:timeframe.aggregate?'Uses hourly candles grouped into a 3-hour view.':'21 historical candles received.'});
+      }catch(error){
+        checks.push({label:timeframe.label,ok:false,detail:error.message});
+      }
+      setDiagnostics([...checks]);
+    }
+    setDiagnosticsBusy(false);
   }
 
   async function loadObservations(){
@@ -67,6 +92,19 @@ export default function BlackDashboard(){
       <div><div className="eyebrow">BLACK · MARKET OBSERVATORY</div><h1><Activity/> Black</h1>
       <p>Explore a wider range of listed companies across five chart timeframes. This workspace displays historical market data for learning and comparison only.</p></div>
       <span className="black-label">40 STOCKS · 5 TIMEFRAMES</span>
+    </div>
+
+
+    <div className="black-diagnostics">
+      <div className="black-diagnostics-head">
+        <div><div className="eyebrow">SYSTEM CHECK · MARKET DATA</div><h2>Data connection health</h2><p>Test the server-side provider connection against AAPL across all five supported views. This makes five historical-candle requests.</p></div>
+        <button className="black-diagnostic-button" onClick={runDiagnostics} disabled={diagnosticsBusy}>{diagnosticsBusy?'Checking providers…':'Run 5-timeframe check'}</button>
+      </div>
+      {diagnostics.length>0&&<div className="black-diagnostic-grid">{diagnostics.map(item=><article className="black-diagnostic-card" key={item.label}>
+        <div><b>{item.label}</b><span className={item.ok?'diagnostic-ok':'diagnostic-fail'}>{item.ok?'CONNECTED':'UNAVAILABLE'}</span></div>
+        {item.ok?<><small>{item.source} · {item.count} candles</small><small>Latest candle: {item.last}</small><small>{item.detail}</small></>:<p>{item.detail}</p>}
+      </article>)}</div>}
+      <p className="black-diagnostic-note">A successful check confirms historical candles can be retrieved; it does not guarantee real-time quotes, uninterrupted provider access, or forecast accuracy.</p>
     </div>
 
     <div className="black-duration">
