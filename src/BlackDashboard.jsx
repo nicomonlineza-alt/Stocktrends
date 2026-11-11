@@ -21,7 +21,7 @@ const DURATIONS = [
   {label:'3 Hour',interval:'1h',bars:100,aggregate:3,description:'Three-hour view, grouped from hourly candles'}
 ];
 
-const fmt=(v)=>Number.isFinite(Number(v))?Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
+const fmt=(v)=>v==null||v===''||!Number.isFinite(Number(v))?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const pct=(v)=>Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+Number(v).toFixed(2)+'%':'—';
 
 const emaSeries=(values,period)=>{
