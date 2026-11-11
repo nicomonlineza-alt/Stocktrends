@@ -44,7 +44,8 @@ const rsiValue=(values,period=14)=>{
 };
 const aggregateCandles=(candles,size)=>{
   const groups=[];
-  for(let i=0;i+size<=candles.length;i+=size){
+  const offset=candles.length%size;
+  for(let i=offset;i+size<=candles.length;i+=size){
     const rows=candles.slice(i,i+size),first=rows[0],last=rows.at(-1);
     groups.push({datetime:last.datetime,open:Number(first.open),high:Math.max(...rows.map(r=>Number(r.high))),low:Math.min(...rows.map(r=>Number(r.low))),close:Number(last.close),volume:rows.every(r=>r.volume!=null)?rows.reduce((sum,r)=>sum+Number(r.volume),0):null});
   }
