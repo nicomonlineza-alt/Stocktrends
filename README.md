@@ -20,7 +20,7 @@ Stocktrends is an educational stock-research prototype focused on a five-stock d
 
 ## Important limitations
 
-**The current dashboard still uses illustrative sample data and does not yet display live Twelve Data prices or a connected AI model. The daily R100 journal currently calculates from the illustrative percentage changes in the demo candidate list; it does not yet calculate genuine end-of-day results from verified market closes or make genuine AI-generated selections.** The server-side endpoint scaffold is committed, but it needs a private `TWELVE_DATA_API_KEY` environment variable in the hosting environment and frontend integration before live data will appear. Prices, day changes, feature values, scores, and forecast bias currently shown in the dashboard are illustrative only. Manually marked outcomes are not a verified backtest. Do not use this prototype to make investment decisions.
+**The current dashboard still uses illustrative sample data and does not yet display live Twelve Data prices or a connected AI model. The daily R100 journal currently calculates from the illustrative percentage changes in the demo candidate list; it does not yet calculate genuine end-of-day results from verified market closes or make genuine AI-generated selections.** The Black dashboard now includes an in-app five-timeframe market-data connection check. The Vercel project has production entries configured for the Finnhub and Twelve Data key names; provider access still needs to be confirmed by running the diagnostic in the deployed app. The 3-hour display is derived by grouping hourly candles, not by requesting a native 3-hour interval. Prices, day changes, feature values, scores, and forecast bias currently shown in the dashboard are illustrative only. Manually marked outcomes are not a verified backtest. Do not use this prototype to make investment decisions.
 
 The browser stores the paper account, prediction log, and R100 daily journal locally on that device/browser. Data is not yet synced to a server, so clearing browser storage or switching devices will not carry it over.
 
@@ -40,10 +40,10 @@ The `.env.example` file documents the required variable name only; it does not c
 
 ## Next milestones
 
-1. Verify production build and endpoint behaviour.
-2. Configure private `FINNHUB_API_KEY` and/or `TWELVE_DATA_API_KEY` in Vercel, redeploy, and test provider access end-to-end.
-3. Add a durable server-side database so paper positions and learning history persist across devices.
-4. Automatically evaluate frozen daily picks against verified future prices; add spread/fees, slippage, drawdown, benchmark comparisons, and out-of-sample testing.
-5. Add a scheduled scan service only after the rules have been validated; browser-triggered scans do not run when the app is closed.
+1. Run the in-app five-timeframe data diagnostic and resolve provider errors or rate limits.
+2. Add transparent indicator calculations using verified candles, with clear timestamps and data-quality labels.
+3. Add a durable server-side database so educational observations and learning history persist across devices.
+4. Evaluate frozen historical observations on unseen periods with costs, drawdown, and benchmark comparisons before making performance claims.
+5. Keep the app in educational observation and simulated mode; no brokerage connection or real-money execution.
 
 See [PROJECT_PLAN.md](./PROJECT_PLAN.md), [STRATEGY.md](./STRATEGY.md), and [docs/progress-log.md](./docs/progress-log.md).
