@@ -61,3 +61,8 @@ These calculations are descriptive historical measurements only. They are not re
 The Black dashboard includes an AI Suggestions workflow. It scans a fixed ten-symbol educational watchlist using one-minute historical candles, ranks available symbols with transparent RSI, EMA, MACD, relative-volume, and recent-movement rules, and selects five for a five-minute observation window. At the end, it requests a fresh snapshot, records the observed price change, and saves the initial ranking and outcome to a browser-local learning journal. A separate Learn button saves the currently loaded indicator snapshot.
 
 This is a deterministic indicator-ranking and journaling experiment, not a trained predictive model, investment recommendation, or guarantee of profit. It places no orders and has no brokerage integration. Results are stored in the current browser/device only; clearing browser storage or switching devices will not carry the journal across. Provider delays and market hours can affect the before/after comparison.
+
+
+### AI Suggestions live observation chart
+
+During a five-minute AI Suggestions session, the dashboard plots each of the five selected symbols as a separate line showing percentage movement from its starting observed price. It refreshes the five symbols approximately once per minute and adds a final observation at the end of the session. The chart uses provider candle data and may therefore be delayed or unavailable outside supported market hours. This is a visual paper-observation tracker, not executed trades or cash P&L; it does not include fees, spread, slippage, or order fills.
