@@ -54,3 +54,10 @@ See [PROJECT_PLAN.md](./PROJECT_PLAN.md), [STRATEGY.md](./STRATEGY.md), and [doc
 The Black workspace now retrieves up to 60 historical candles per selected company for the 1-minute, 5-minute, 15-minute, and 1-hour views. Its 3-hour view requests up to 100 hourly candles and groups complete sets of three consecutive hourly candles. The dashboard calculates and displays RSI(14), EMA 9, EMA 21, MACD (12/26) with its 9-period signal and histogram when enough history is available, relative volume against the prior 20 candles, and a comparison of the latest five-candle move with the preceding five-candle move.
 
 These calculations are descriptive historical measurements only. They are not recommendations, forecasts, trade entries, or proof of a profitable strategy. The 3-hour groups are locally assembled and may not align with official exchange session boundaries. Missing volume or insufficient history is shown as unavailable rather than filled with estimated values.
+
+
+## AI Suggestions — five-minute paper-learning experiment
+
+The Black dashboard includes an AI Suggestions workflow. It scans a fixed ten-symbol educational watchlist using one-minute historical candles, ranks available symbols with transparent RSI, EMA, MACD, relative-volume, and recent-movement rules, and selects five for a five-minute observation window. At the end, it requests a fresh snapshot, records the observed price change, and saves the initial ranking and outcome to a browser-local learning journal. A separate Learn button saves the currently loaded indicator snapshot.
+
+This is a deterministic indicator-ranking and journaling experiment, not a trained predictive model, investment recommendation, or guarantee of profit. It places no orders and has no brokerage integration. Results are stored in the current browser/device only; clearing browser storage or switching devices will not carry the journal across. Provider delays and market hours can affect the before/after comparison.
