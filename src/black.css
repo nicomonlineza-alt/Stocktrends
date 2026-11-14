@@ -162,3 +162,23 @@
 .two-minute-disclaimer{margin:16px 0 0}
 @media(max-width:850px){.market-universe{grid-template-columns:1fr}.market-assets{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:620px){.two-minute-lab{padding:14px}.two-minute-top{display:block}.two-minute-pill{display:inline-block;margin-top:13px}.market-assets{grid-template-columns:repeat(2,minmax(0,1fr))}.two-minute-action{align-items:stretch;flex-direction:column}.two-minute-start{width:100%;white-space:normal}.two-minute-grid{grid-template-columns:1fr}.two-minute-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.two-minute-levels{grid-template-columns:repeat(2,minmax(0,1fr))}.two-minute-learning-summary{align-items:flex-start;flex-direction:column}.two-minute-status{align-items:flex-start;flex-direction:column}}
+
+
+/* Market intelligence feed */
+.market-news-panel{margin:28px 0;padding:22px;border:1px solid rgba(0,209,255,.2);border-radius:20px;background:rgba(7,15,28,.72);backdrop-filter:blur(18px)}
+.market-news-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px}
+.market-news-heading small{font-size:10px;letter-spacing:.16em;color:#00d1ff}
+.market-news-heading h2{margin:6px 0 0;font-size:21px;color:#fff}
+.market-news-heading>span,.market-news-meta{font-size:11px;color:#9aabc0}
+.market-news-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.market-news-item{padding:15px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.035);min-width:0}
+.market-news-meta{display:flex;justify-content:space-between;gap:10px;margin-bottom:8px}
+.market-news-item>a{color:#eaf6ff;font-weight:650;text-decoration:none;line-height:1.4}
+.market-news-item>a:hover{color:#00d1ff}
+.market-news-item p{font-size:12px;line-height:1.5;color:#aab8ca;margin:8px 0}
+.market-news-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.market-news-tags span{font-size:10px;color:#8ce8ff;background:rgba(0,209,255,.08);padding:4px 7px;border-radius:20px}
+.market-news-status,.market-news-note{font-size:12px;color:#9aabc0}
+.market-news-note{margin:14px 0 0}
+.two-minute-price small{display:block;font-size:10px;color:#8fa5bc;font-weight:400;margin-top:4px}
+@media(max-width:700px){.market-news-list{grid-template-columns:1fr}.market-news-heading{flex-direction:column}}
