@@ -1,4 +1,5 @@
 import BlackDashboard from './BlackDashboard.jsx';
+import TwoMinuteScalp from './TwoMinuteScalp.jsx';
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
         <span className="black-only-badge"><i/> OBSERVATION MODE</span>
       </header>
       <main id="top" className="black-only-main">
+        <TwoMinuteScalp />
         <BlackDashboard />
         <footer className="black-only-footer">STOCKTRENDS BLACK · Educational market observation · No trade recommendations or broker orders</footer>
       </main>
