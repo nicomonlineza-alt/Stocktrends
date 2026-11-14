@@ -80,6 +80,11 @@ export default function TwoMinuteScalp() {
   useEffect(() => {
     if (session?.status === 'running' && remaining === 0) finish(session);
   },[remaining]);
+  useEffect(() => {
+    if (!session || session.status !== 'running') return;
+    const id = setInterval(() => refresh(session), 30000);
+    return () => clearInterval(id);
+  },[session?.id,session?.status]);
   async function getAnalysis(symbol) {
     const response = await fetch('/api/market-data?symbol='+encodeURIComponent(symbol)+'&interval=1min&outputsize=60');
     const payload = await response.json();
