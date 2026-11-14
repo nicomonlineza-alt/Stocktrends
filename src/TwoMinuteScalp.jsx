@@ -1,161 +1,47 @@
-import { useEffect, useMemo, useState } from 'react';
-
-const WATCHLIST = ['NVDA','MSFT','AAPL','AMZN','GOOGL','META','TSLA','AVGO','AMD','NFLX'];
-const money = (v) => Number.isFinite(v) ? v.toFixed(2) : '—';
-const pct = (v) => Number.isFinite(v) ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '—';
-const ema = (values, period) => {
-  if (values.length < period) return null;
-  const alpha = 2 / (period + 1);
-  let value = values.slice(0, period).reduce((a,b) => a+b, 0) / period;
-  for (let i=period; i<values.length; i++) value = values[i]*alpha + value*(1-alpha);
-  return value;
+import {useEffect,useMemo,useState} from 'react';
+const GROUPS={
+ Stocks:[['AAPL','Apple'],['NVDA','NVIDIA'],['MSFT','Microsoft'],['AMZN','Amazon']],
+ Crypto:[['BTC/USD','Bitcoin'],['ETH/USD','Ethereum'],['SOL/USD','Solana'],['XRP/USD','XRP']],
+ Forex:[['EUR/USD','Euro / US Dollar'],['GBP/USD','British Pound / US Dollar'],['USD/JPY','US Dollar / Japanese Yen'],['AUD/USD','Australian Dollar / US Dollar']]
 };
-function analyse(candles) {
-  const rows = [...candles].sort((a,b) => String(a.datetime).localeCompare(String(b.datetime)));
-  if (rows.length < 26) throw new Error('At least 26 one-minute candles are required.');
-  const close = rows.map(r => Number(r.close));
-  const high = rows.map(r => Number(r.high));
-  const low = rows.map(r => Number(r.low));
-  const volume = rows.map(r => Number(r.volume) || 0);
-  const last = rows.at(-1), price = close.at(-1);
-  const e9 = ema(close,9), e21 = ema(close,21);
-  const volSum = volume.reduce((a,b)=>a+b,0);
-  const vwap = volSum > 0 ? rows.reduce((s,r)=>s+((Number(r.high)+Number(r.low)+Number(r.close))/3)*(Number(r.volume)||0),0)/volSum : null;
-  const avgVol = volume.slice(-21,-1).reduce((a,b)=>a+b,0)/Math.max(1,volume.slice(-21,-1).length);
-  const volRatio = avgVol > 0 ? volume.at(-1)/avgVol : null;
-  const recentHigh = Math.max(...high.slice(-7,-1));
-  const recentLow = Math.min(...low.slice(-7,-1));
-  const range = Math.max(...high.slice(-8)) - Math.min(...low.slice(-8));
-  const avgRange = rows.slice(-15,-1).reduce((s,r)=>s+(Number(r.high)-Number(r.low)),0)/14;
-  const upSweep = Number(last.high) > recentHigh && price < recentHigh;
-  const downSweep = Number(last.low) < recentLow && price > recentLow;
-  const body = Math.abs(Number(last.close)-Number(last.open));
-  const candleRange = Math.max(0.000001,Number(last.high)-Number(last.low));
-  const bullReject = (Math.min(Number(last.open),price)-Number(last.low))/candleRange > .55 && price > Number(last.open);
-  const bearReject = (Number(last.high)-Math.max(Number(last.open),price))/candleRange > .55 && price < Number(last.open);
-  const bias = vwap == null ? 'Chop' : price > vwap && e9 > e21 ? 'Bullish' : price < vwap && e9 < e21 ? 'Bearish' : 'Chop';
-  const overlapping = range < avgRange*3.2;
-  const quiet = volRatio != null && volRatio < .75;
-  const choppy = bias === 'Chop' && (overlapping || quiet);
-  const longFlag = bias === 'Bullish' && close.at(-1) > close.at(-4) && Math.max(...high.slice(-3)) < Math.max(...high.slice(-6,-3))*1.003;
-  const shortFlag = bias === 'Bearish' && close.at(-1) < close.at(-4) && Math.min(...low.slice(-3)) > Math.min(...low.slice(-6,-3))*.997;
-  const pattern = choppy ? 'NO TRADE — CHOPPY / LOW MOMENTUM'
-    : downSweep && bias !== 'Bearish' ? 'Downside liquidity sweep / reclaim'
-    : upSweep && bias !== 'Bullish' ? 'Upside liquidity sweep / rejection'
-    : longFlag ? 'Bull micro-flag (forming)'
-    : shortFlag ? 'Bear micro-flag (forming)'
-    : bias === 'Bullish' && bullReject ? 'VWAP-side bullish rejection'
-    : bias === 'Bearish' && bearReject ? 'VWAP-side bearish rejection'
-    : 'NO TRADE — NO CLEAR MICRO-PATTERN';
-  const direction = /bull|downside/i.test(pattern) && !choppy ? 'Long' : /bear|upside/i.test(pattern) && !choppy ? 'Short' : null;
-  const entry = price;
-  const structuralStop = direction === 'Long' ? Math.min(Number(last.low),recentLow) : direction === 'Short' ? Math.max(Number(last.high),recentHigh) : null;
-  const risk = direction ? Math.abs(entry-structuralStop) : 0;
-  const target1 = direction ? entry + (direction==='Long'?1:-1)*risk*1.5 : null;
-  const target2 = direction ? entry + (direction==='Long'?1:-1)*risk*2.5 : null;
-  const valid = !!direction && risk > 0 && volRatio != null && volRatio >= .8 && e9 != null && e21 != null;
-  return {
-    bias, vwap, e9, e21, volRatio, pattern: valid ? pattern : (choppy ? pattern : 'NO TRADE — CONFIRMATION INCOMPLETE'),
-    direction: valid ? direction : null, entry: valid ? entry : null, stop: valid ? structuralStop : null,
-    target1: valid ? target1 : null, target2: valid ? target2 : null,
-    lastCandle: last.datetime, price, recentHigh, recentLow,
-    riskNote: volRatio == null ? 'Volume unavailable; confirmation cannot be checked.' : volRatio < .8 ? 'Volume is below the required confirmation threshold.' : 'Check spread, delayed candles and nearby session levels.',
-    candleTrigger: valid ? 'Only after this 1-minute candle closes and the next quote holds the trigger zone.' : 'Wait for a confirmed candle close; do not force a setup.',
-    volumeText: volRatio == null ? 'Volume unavailable' : volRatio.toFixed(2)+'× the prior 20-candle average',
-    setupReady: valid
-  };
+const ASSETS=Object.entries(GROUPS).flatMap(([kind,rows])=>rows.map(([symbol,name])=>({kind,symbol,name})));
+const fmt=v=>Number.isFinite(v)?v.toLocaleString(undefined,{maximumFractionDigits:5}):'—';
+const ema=(a,n)=>{if(a.length<n)return null;let x=a.slice(0,n).reduce((s,v)=>s+v,0)/n;const k=2/(n+1);for(let i=n;i<a.length;i++)x=a[i]*k+x*(1-k);return x};
+function analyse(c){
+ const r=[...c].sort((a,b)=>String(a.datetime).localeCompare(String(b.datetime)));if(r.length<26)throw Error('Insufficient candles');
+ const cl=r.map(x=>+x.close),hi=r.map(x=>+x.high),lo=r.map(x=>+x.low),vol=r.map(x=>+x.volume||0),last=r.at(-1),price=cl.at(-1),e9=ema(cl,9),e21=ema(cl,21),sum=vol.reduce((a,b)=>a+b,0);
+ const vwap=sum?r.reduce((s,x)=>s+((+x.high + +x.low + +x.close)/3)*(+x.volume||0),0)/sum:null;
+ const av=vol.slice(-21,-1).reduce((a,b)=>a+b,0)/20,vr=av&&vol.at(-1)?vol.at(-1)/av:null;
+ const rh=Math.max(...hi.slice(-7,-1)),rl=Math.min(...lo.slice(-7,-1)),span=Math.max(...hi.slice(-8))-Math.min(...lo.slice(-8)),ar=r.slice(-15,-1).reduce((s,x)=>s+(+x.high- +x.low),0)/14;
+ const bias=vwap==null?'Neutral':price>vwap&&e9>e21?'Bullish':price<vwap&&e9<e21?'Bearish':'Neutral';
+ const sweepDown=+last.low<rl&&price>rl,sweepUp=+last.high>rh&&price<rh;
+ const cr=Math.max(.0000001,+last.high- +last.low),bull=(Math.min(+last.open,price)- +last.low)/cr>.55&&price>+last.open,bear=(+last.high-Math.max(+last.open,price))/cr>.55&&price<+last.open;
+ const chop=bias==='Neutral'&&(span<ar*3.2||(vr!=null&&vr<.75));
+ const flagUp=bias==='Bullish'&&cl.at(-1)>cl.at(-4)&&Math.max(...hi.slice(-3))<Math.max(...hi.slice(-6,-3))*1.003;
+ const flagDn=bias==='Bearish'&&cl.at(-1)<cl.at(-4)&&Math.min(...lo.slice(-3))>Math.min(...lo.slice(-6,-3))*.997;
+ const pattern=chop?'NO TRADE — CHOPPY / LOW MOMENTUM':sweepDown?'Downside liquidity sweep / reclaim':sweepUp?'Upside liquidity sweep / rejection':flagUp?'Bull micro-flag':flagDn?'Bear micro-flag':bias==='Bullish'&&bull?'Bullish rejection':bias==='Bearish'&&bear?'Bearish rejection':'NO TRADE — NO CLEAR PATTERN';
+ const dir=/Bull|Downside/i.test(pattern)?'Long':/Bear|Upside/i.test(pattern)?'Short':null,stop=dir==='Long'?Math.min(+last.low,rl):dir==='Short'?Math.max(+last.high,rh):null,risk=dir?Math.abs(price-stop):0;
+ const ready=!!dir&&risk>0&&(vr==null||vr>=.8);
+ return {price,bias,vwap,e9,e21,vr,pattern:ready?pattern:chop?pattern:'NO TRADE — CONFIRMATION INCOMPLETE',direction:ready?dir:null,entry:ready?price:null,stop:ready?stop:null,t1:ready?price+(dir==='Long'?1:-1)*risk*1.5:null,t2:ready?price+(dir==='Long'?1:-1)*risk*2.5:null,ready,volume:vr==null?'Unavailable':vr.toFixed(2)+'× average'};
 }
-export default function TwoMinuteScalp() {
-  const [session,setSession] = useState(null);
-  const [busy,setBusy] = useState(false);
-  const [remaining,setRemaining] = useState(0);
-  const [status,setStatus] = useState('Ready for a two-minute paper observation.');
-  useEffect(() => {
-    if (!session || session.status !== 'running') return;
-    const tick = () => setRemaining(Math.max(0,Math.ceil((session.endsAt-Date.now())/1000)));
-    tick();
-    const id = setInterval(tick,500);
-    return () => clearInterval(id);
-  },[session]);
-  useEffect(() => {
-    if (session?.status === 'running' && remaining === 0) finish(session);
-  },[remaining]);
-  useEffect(() => {
-    if (!session || session.status !== 'running') return;
-    const id = setInterval(() => refresh(session), 30000);
-    return () => clearInterval(id);
-  },[session?.id,session?.status]);
-  async function getAnalysis(symbol) {
-    const response = await fetch('/api/market-data?symbol='+encodeURIComponent(symbol)+'&interval=1min&outputsize=60');
-    const payload = await response.json();
-    if (!response.ok || !Array.isArray(payload.candles)) throw new Error(payload.error || 'Market data unavailable');
-    return {symbol, ...analyse(payload.candles)};
-  }
-  async function scan() {
-    if (busy || session?.status === 'running') return;
-    setBusy(true); setStatus('Checking the fixed watchlist against the two-minute observation rules…');
-    const results=[];
-    for (const symbol of WATCHLIST) {
-      try { results.push(await getAnalysis(symbol)); }
-      catch(error) { results.push({symbol,error:error.message,setupReady:false}); }
-    }
-    const ranked=results.filter(r=>r.setupReady).sort((a,b)=>(b.volRatio||0)-(a.volRatio||0)).slice(0,5);
-    const selected=ranked.length ? ranked : results.filter(r=>!r.error).slice(0,5);
-    if (!selected.length) { setStatus('No valid market data returned. Try again when the provider is available.'); setBusy(false); return; }
-    const startedAt=Date.now();
-    const next={id:startedAt,status:'running',startedAt,endsAt:startedAt+120000,stocks:selected,history:[]};
-    setSession(next); setRemaining(120);
-    setStatus('Two-minute observation started. Signals are educational and paper-only; no orders are placed.');
-    setBusy(false);
-  }
-  async function refresh(current) {
-    const updates=[];
-    for (const stock of current.stocks) {
-      try { updates.push(await getAnalysis(stock.symbol)); }
-      catch(error) { updates.push({symbol:stock.symbol,error:error.message,setupReady:false}); }
-    }
-    setSession(s => s?.id===current.id && s.status==='running' ? {...s,latest:updates,history:[...(s.history||[]),{at:Date.now(),stocks:updates}]} : s);
-  }
-  async function finish(current) {
-    if (busy || current.status !== 'running') return;
-    setBusy(true); setStatus('Two minutes complete. Refreshing final observations…');
-    await refresh(current);
-    setSession(s=>s?.id===current.id?{...s,status:'complete'}:s);
-    setStatus('Two-minute paper observation complete. Review the recorded patterns and data quality.');
-    setBusy(false);
-  }
-  return <section style={{margin:'0 0 20px',padding:20,border:'1px solid rgba(97,228,210,.28)',borderRadius:16,background:'linear-gradient(135deg,rgba(24,69,76,.38),rgba(9,16,28,.95))'}}>
-    <div className="eyebrow">BLACK · TWO-MINUTE SCALPING LAB</div>
-    <h2 style={{margin:'7px 0',color:'#edf5fc'}}>2-Minute Strategy Test</h2>
-    <p style={{color:'#aab6c9',fontSize:12,lineHeight:1.6,maxWidth:820}}>Screens five symbols from a fixed watchlist using one-minute OHLCV candles, then observes the selected setups for two minutes. VWAP is calculated over the available 60-candle window (a proxy, not a verified exchange-session VWAP). This is an educational paper-analysis tool only.</p>
-    <button className="black-load" onClick={scan} disabled={busy||session?.status==='running'}>{busy?'Working…':session?.status==='running'?'Observation running':'Start 2-minute session'}</button>
-    <button className="black-learn-button" style={{marginLeft:8}} onClick={()=>session&&refresh(session)} disabled={!session||busy}>Refresh observations</button>
-    <p className="black-ai-message" role="status">{status}</p>
-    {session && <>
-      <div style={{fontSize:26,fontWeight:800,color:'#7ce5cb',fontVariantNumeric:'tabular-nums'}}>{session.status==='running'?Math.floor(remaining/60)+':'+String(remaining%60).padStart(2,'0'):'Complete'}</div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(245px,1fr))',gap:10,marginTop:12}}>
-        {(session.latest||session.stocks).map(row=><article key={row.symbol} className="black-result">
-          <div className="black-result-top"><div><b>{row.symbol}</b><small>{row.lastCandle||row.error||'Initial scan'}</small></div><span className="black-time-chip">{row.bias||'Unavailable'}</span></div>
-          {row.error ? <p className="black-error">{row.error}</p> : <>
-            <div style={{fontSize:13,fontWeight:800,color:row.setupReady?'#9ce1c8':'#e5c58a',margin:'12px 0'}}>{row.pattern}</div>
-            <div className="black-data-grid">
-              <div><small>Last price</small><b>{money(row.price)}</b></div>
-              <div><small>VWAP (60-candle)</small><b>{money(row.vwap)}</b></div>
-              <div><small>EMA 9 / 21</small><b>{money(row.e9)} / {money(row.e21)}</b></div>
-              <div><small>Relative volume</small><b>{row.volumeText}</b></div>
-            </div>
-            <p className="black-indicator-note">Micro-pattern: {row.pattern}. Candle trigger: {row.candleTrigger}</p>
-            {row.setupReady ? <div className="black-data-grid" style={{marginTop:8}}>
-              <div><small>Hypothetical entry</small><b>{money(row.entry)}</b></div>
-              <div><small>Invalidation</small><b>{money(row.stop)}</b></div>
-              <div><small>Target 1 · 1:1.5</small><b>{money(row.target1)}</b></div>
-              <div><small>Target 2 · 1:2.5</small><b>{money(row.target2)}</b></div>
-            </div> : <p className="black-error">NO TRADE. {row.riskNote||'No sufficiently confirmed setup.'}</p>}
-            <p className="black-indicator-note">Risk check: {row.riskNote} Levels are hypothetical study annotations, not orders or a recommendation.</p>
-          </>}
-        </article>)}
-      </div>
-      <p className="black-indicator-note">This scan cannot verify pre-market or prior-day levels, true order flow, exchange-session VWAP, bid/ask spread or news volatility from the available candle endpoint. Missing data is not invented. Historical candles can be delayed and the two-minute timer does not make the feed real-time.</p>
-    </>}
-  </section>;
+const initialLearning=()=>{try{return JSON.parse(localStorage.getItem('st-2m-learn')||'{"sessions":0,"setups":0,"positive":0,"negative":0,"patterns":{}}')}catch{return {sessions:0,setups:0,positive:0,negative:0,patterns:{}}}};
+export default function TwoMinuteScalp(){
+ const [session,setSession]=useState(null),[busy,setBusy]=useState(false),[left,setLeft]=useState(0),[message,setMessage]=useState('Ready. Start a two-minute paper session.'),[learn,setLearn]=useState(initialLearning),[outcomes,setOutcomes]=useState([]);
+ const groups=useMemo(()=>Object.entries(GROUPS),[]);
+ useEffect(()=>{if(session?.status!=='running')return;const tick=()=>setLeft(Math.max(0,Math.ceil((session.end-Date.now())/1000)));tick();const id=setInterval(tick,250);return()=>clearInterval(id)},[session?.id,session?.status]);
+ useEffect(()=>{if(session?.status==='running'&&left===0&&!busy)finish()},[left,session?.status,busy]);
+ async function get(asset){const res=await fetch('/api/market-data?symbol='+encodeURIComponent(asset.symbol)+'&interval=1min&outputsize=60');const p=await res.json();if(!res.ok||!Array.isArray(p.candles))throw Error(p.error||'Provider unavailable');return {...asset,...analyse(p.candles)}}
+ async function batch(list){return Promise.all(list.map(async a=>{try{return await get(a)}catch(e){return {...a,error:e.message,ready:false}}}))}
+ async function start(){if(busy||session?.status==='running')return;setBusy(true);setMessage('Scanning stocks, crypto and forex…');const scan=await batch(ASSETS);const ok=scan.filter(x=>!x.error);if(!ok.length){setMessage('No market data returned. Check API access and provider limits.');setBusy(false);return}const selected=[...ok].sort((a,b)=>Number(b.ready)-Number(a.ready)||(b.vr||0)-(a.vr||0)).slice(0,10);const now=Date.now();setSession({id:now,status:'running',start:now,end:now+120000,selected});setOutcomes([]);setLeft(120);setMessage('10 candidates selected. Observing for two minutes; paper mode only.');setBusy(false)}
+ async function finish(){if(!session||session.status!=='running'||busy)return;setBusy(true);setMessage('Session complete. Capturing final prices and learning from the ten observations…');const final=await batch(session.selected);const rows=session.selected.map(a=>{const b=final.find(x=>x.symbol===a.symbol);const raw=a.entry&&b?.price?(b.price-a.entry)/a.entry*100:null;const result=raw==null||!a.direction?null:a.direction==='Long'?raw:-raw;return {...a,endPrice:b?.price??null,result}});const valid=rows.filter(x=>x.result!=null);const next={...learn,sessions:learn.sessions+1,setups:learn.setups+valid.length,positive:learn.positive+valid.filter(x=>x.result>0).length,negative:learn.negative+valid.filter(x=>x.result<0).length,patterns:{...learn.patterns}};valid.forEach(x=>{const p=next.patterns[x.pattern]||{count:0,positive:0,total:0};next.patterns[x.pattern]={count:p.count+1,positive:p.positive+(x.result>0?1:0),total:p.total+x.result}});localStorage.setItem('st-2m-learn',JSON.stringify(next));setLearn(next);setOutcomes(rows);setSession(s=>s?.id===session.id?{...s,status:'complete',latest:final}:s);setMessage('Learning journal updated. Pattern statistics are saved on this device.');setBusy(false)}
+ const rows=session?.latest||session?.selected||[];
+ return <section className="two-minute-lab">
+  <header className="two-minute-top"><div><div className="eyebrow">BLACK · MULTI-MARKET PAPER LAB</div><h1>Market Watch</h1><p>Stocks, cryptocurrency and forex in one view. Start one session and the system scans the market, selects ten candidates, observes them for two minutes and updates its pattern journal.</p></div><span className="two-minute-pill">● PAPER MODE</span></header>
+  <div className="market-universe">{groups.map(([kind,assets])=><section className="market-category" key={kind}><div className="market-category-head"><h2>{kind}</h2><span>{assets.length} instruments</span></div><div className="market-assets">{assets.map(([symbol,name])=><div className="market-asset" key={symbol}><b>{symbol}</b><span>{name}</span></div>)}</div></section>)}</div>
+  <div className="two-minute-action"><div><small>ONE-CLICK SESSION</small><h2>10 candidates · 2 minutes · automatic learning</h2><p>Only the start button is needed. The system ranks the available setups and records hypothetical entry and closing prices.</p></div><button className="two-minute-start" onClick={start} disabled={busy||session?.status==='running'}>{busy?'Working…':session?.status==='running'?'SESSION RUNNING':'▶ START 2-MINUTE TRADE'}</button></div>
+  <div className="two-minute-status"><span>{message}</span>{session&&<strong>{session.status==='running'?Math.floor(left/60)+':'+String(left%60).padStart(2,'0'):'COMPLETE'}</strong>}</div>
+  {session&&<><div className="two-minute-results-head"><h2>System-selected ten</h2></div><div className="two-minute-grid">{rows.map(x=><article className="two-minute-card" key={x.symbol}><div className="two-minute-card-head"><div><b>{x.symbol}</b><small>{x.kind} · {x.name}</small></div><span className={x.ready?'setup-ready':'setup-wait'}>{x.ready?'SETUP FOUND':'NO TRADE'}</span></div>{x.error?<p className="market-error">{x.error}</p>:<><div className="two-minute-price">{fmt(x.price)}</div><div className="two-minute-metrics"><div><small>Bias</small><b>{x.bias}</b></div><div><small>VWAP</small><b>{fmt(x.vwap)}</b></div><div><small>EMA 9 / 21</small><b>{fmt(x.e9)} / {fmt(x.e21)}</b></div><div><small>Volume</small><b>{x.volume}</b></div></div><p className="two-minute-pattern">{x.pattern}</p>{x.ready&&<div className="two-minute-levels"><span>Entry <b>{fmt(x.entry)}</b></span><span>Stop <b>{fmt(x.stop)}</b></span><span>Target 1 <b>{fmt(x.t1)}</b></span><span>Target 2 <b>{fmt(x.t2)}</b></span></div>}</>}</article>)}</div>{session.status==='running'&&<button className="two-minute-finish" onClick={finish} disabled={busy}>Finish now &amp; learn</button>}{session.status==='complete'&&<div className="two-minute-learning"><h2>Session learning results</h2><p>Compares hypothetical entry with the final observed price. No real orders were placed; fees and spread are not included.</p>{outcomes.map(x=><div className="two-minute-outcome" key={x.symbol}><span><b>{x.symbol}</b> · {x.pattern}</span><strong>{x.result==null?'NO VALID SETUP':(x.result>=0?'+':'')+x.result.toFixed(3)+'%'}</strong></div>)}</div>}</>}
+  <div className="two-minute-learning-summary"><div><small>LEARNING JOURNAL · SAVED ON THIS DEVICE</small><h2>Pattern memory</h2></div><div className="learning-stats"><span><b>{learn.sessions}</b>Sessions</span><span><b>{learn.setups}</b>Setups scored</span><span><b>{learn.positive}</b>Positive</span><span><b>{learn.negative}</b>Negative</span></div></div>
+  <p className="two-minute-disclaimer">This is a curated starter universe, not every instrument listed worldwide. Provider symbol coverage and data limits apply. VWAP uses the returned 60-candle window, not guaranteed full-session VWAP; forex volume may be unavailable. Learning records pattern outcome statistics locally; it does not retrain a predictive AI model. Paper simulation only, no broker orders or guaranteed performance.</p>
+ </section>
 }
