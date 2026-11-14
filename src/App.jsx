@@ -1,21 +1,4 @@
-import BlackDashboard from './BlackDashboard.jsx';
 import TwoMinuteScalp from './TwoMinuteScalp.jsx';
-
-export default function App() {
-  return (
-    <div className="app-shell black-only-shell">
-      <header className="black-only-topbar">
-        <a className="brand" href="#top" aria-label="Stocktrends Black home">
-          <span className="brand-mark">◈</span>
-          <span>stock<span className="brand-accent">trends</span><small>BLACK · MARKET OBSERVATORY</small></span>
-        </a>
-        <span className="black-only-badge"><i/> OBSERVATION MODE</span>
-      </header>
-      <main id="top" className="black-only-main">
-        <TwoMinuteScalp />
-        <BlackDashboard />
-        <footer className="black-only-footer">STOCKTRENDS BLACK · Educational market observation · No trade recommendations or broker orders</footer>
-      </main>
-    </div>
-  );
+export default function App(){
+ return <div className="app-shell black-only-shell"><header className="black-only-topbar"><a className="brand" href="#top" aria-label="Stocktrends home"><span className="brand-mark">◈</span><span>stock<span className="brand-accent">trends</span><small>BLACK · MARKET OBSERVATORY</small></span></a><span className="black-only-badge"><i/> PAPER SESSION</span></header><main id="top" className="black-only-main"><TwoMinuteScalp/><footer className="black-only-footer">STOCKTRENDS BLACK · Educational market observation · Paper simulation only</footer></main></div>
 }
