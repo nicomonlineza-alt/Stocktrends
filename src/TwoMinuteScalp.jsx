@@ -61,6 +61,7 @@ export default function TwoMinuteScalp(){
  localStorage.setItem('st-2m-learn',JSON.stringify(next));setLearn(next);setOutcomes(rows);setSession(s=>s?.id===session.id?{...s,status:'complete',latest:final}:s);
  setMessage(cloudSaved?'Learning journal updated and saved to the cloud database.':supabase?'Session saved locally; cloud database sync is currently unavailable.':'Session saved locally; cloud database is not configured.');
  setBusy(false)}
+ const meter=useMemo(()=>{const scored=outcomes.filter(x=>x.result!=null);const netPct=scored.reduce((sum,x)=>sum+x.result,0);const hasResults=scored.length>0;const winRate=learn.setups>0?(learn.positive/learn.setups)*100:null;const candidates=outcomes.length;const setupRate=candidates>0?(scored.length/candidates)*100:null;const noTradeRate=candidates>0?((candidates-scored.length)/candidates)*100:null;const profitScore=hasResults?Math.max(0,Math.min(100,50+netPct*18)):null;const score=profitScore==null?(winRate==null?0:Math.round(winRate)) : Math.round(Math.max(0,Math.min(100,profitScore*.65+(winRate??50)*.35)));const label=!learn.sessions&&!hasResults?'STANDBY':score>=75?'HIGH EFFICIENCY':score>=55?'BUILDING MOMENTUM':score>=40?'NEEDS REFINEMENT':'LOW PERFORMANCE';return {netPct,hasResults,winRate,setupRate,noTradeRate,score,label}},[outcomes,learn]);
  const rows=session?.latest||session?.selected||[];
  return <section className="two-minute-lab">
   <header className="two-minute-top"><div><div className="eyebrow">BLACK · MULTI-MARKET PAPER LAB</div><h1>Market Watch</h1><p>Stocks, cryptocurrency and forex in one view. Start one session and the system scans the market, selects ten candidates, observes them for two minutes and updates its pattern journal.</p></div><span className="two-minute-pill">● PAPER MODE</span></header>
@@ -70,6 +71,31 @@ export default function TwoMinuteScalp(){
   {session&&<><div className="two-minute-results-head"><h2>System-selected ten</h2></div><div className="two-minute-grid">{rows.map(x=><article className="two-minute-card" key={x.symbol}><div className="two-minute-card-head"><div><b>{x.symbol}</b><small>{x.kind} · {x.name}</small></div><span className={x.ready?'setup-ready':'setup-wait'}>{x.ready?'SETUP FOUND':'NO TRADE'}</span></div>{x.error?<p className="market-error">{x.error}</p>:<><div className="two-minute-price">{fmt(x.price)}<small>Source: {x.dataSource || 'Market feed'}</small></div><div className="two-minute-metrics"><div><small>Bias</small><b>{x.bias}</b></div><div><small>VWAP</small><b>{fmt(x.vwap)}</b></div><div><small>EMA 9 / 21</small><b>{fmt(x.e9)} / {fmt(x.e21)}</b></div><div><small>Volume</small><b>{x.volume}</b></div></div><p className="two-minute-pattern">{x.pattern}</p>{x.ready&&<div className="two-minute-levels"><span>Entry <b>{fmt(x.entry)}</b></span><span>Stop <b>{fmt(x.stop)}</b></span><span>Target 1 <b>{fmt(x.t1)}</b></span><span>Target 2 <b>{fmt(x.t2)}</b></span></div>}</>}</article>)}</div>{session.status==='running'&&<button className="two-minute-finish" onClick={finish} disabled={busy}>Finish now &amp; learn</button>}{session.status==='complete'&&<div className="two-minute-learning"><h2>Session learning results</h2><p>Compares hypothetical entry with the final observed price. No real orders were placed; fees and spread are not included.</p>{outcomes.map(x=><div className="two-minute-outcome" key={x.symbol}><span><b>{x.symbol}</b> · {x.pattern}</span><strong>{x.result==null?'NO VALID SETUP':(x.result>=0?'+':'')+x.result.toFixed(3)+'%'}</strong></div>)}</div>}</>}
   <div className="two-minute-learning-summary"><div><small>LEARNING JOURNAL · SAVED ON THIS DEVICE</small><h2>Pattern memory</h2></div><div className="learning-stats"><span><b>{learn.sessions}</b>Sessions</span><span><b>{learn.setups}</b>Setups scored</span><span><b>{learn.positive}</b>Positive</span><span><b>{learn.negative}</b>Negative</span></div></div>
   <MarketNews />
+  <section className="profit-rev-meter" aria-label="Paper performance and efficiency meter">
+    <div className="profit-rev-heading">
+      <div><small>PERFORMANCE ENGINE · PAPER RESULTS</small><h2>Profitability &amp; efficiency</h2><p>A compact rev-meter for measured results, not a prediction. It rewards positive paper outcomes and consistent setup quality.</p></div>
+      <span className="rev-live-tag">{outcomes.length ? 'LATEST SESSION' : learn.sessions ? 'LEARNING JOURNAL' : 'AWAITING DATA'}</span>
+    </div>
+    <div className="profit-rev-body">
+      <div className="rev-gauge-wrap">
+        <svg className="rev-gauge" viewBox="0 0 320 190" role="img" aria-label={`Effectiveness score ${meter.score} out of 100`}>
+          <defs><linearGradient id="revGradient" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#ed7272"/><stop offset="48%" stopColor="#efc66c"/><stop offset="100%" stopColor="#70e3b3"/></linearGradient></defs>
+          <path d="M 34 158 A 126 126 0 0 1 286 158" fill="none" stroke="rgba(170,190,210,.13)" strokeWidth="19" strokeLinecap="round"/>
+          <path d="M 34 158 A 126 126 0 0 1 286 158" fill="none" stroke="url(#revGradient)" strokeWidth="19" strokeLinecap="round" pathLength="100" strokeDasharray={`${meter.score} 100`}/>
+          <g transform={`rotate(${-90+meter.score*1.8} 160 158)`}><path d="M 160 158 L 160 54" stroke="#effcf8" strokeWidth="4" strokeLinecap="round"/><circle cx="160" cy="158" r="10" fill="#83f1ce" stroke="#071713" strokeWidth="4"/></g>
+          <text x="34" y="183" className="rev-end-label">LOW</text><text x="286" y="183" textAnchor="end" className="rev-end-label">HIGH</text>
+        </svg>
+        <div className="rev-score"><b>{meter.score}</b><span>/ 100</span><small>{meter.label}</small></div>
+      </div>
+      <div className="rev-metrics">
+        <div className="rev-metric"><small>Paper net result</small><b className={meter.netPct>0?'rev-up':meter.netPct<0?'rev-down':''}>{meter.hasResults?(meter.netPct>0?'+':'')+meter.netPct.toFixed(3)+'%':'—'}</b><span>{outcomes.length ? 'Latest completed session' : 'No completed session result yet'}</span></div>
+        <div className="rev-metric"><small>Historical win rate</small><b>{meter.winRate==null?'—':meter.winRate.toFixed(1)+'%'}</b><span>{learn.positive||0} positive / {learn.setups||0} scored</span></div>
+        <div className="rev-metric"><small>Setup efficiency</small><b>{meter.setupRate==null?'—':meter.setupRate.toFixed(1)+'%'}</b><span>{meter.setupRate==null?'Waiting for session data':'Valid setups / candidates'}</span></div>
+        <div className="rev-metric"><small>Energy discipline</small><b>{meter.noTradeRate==null?'—':meter.noTradeRate.toFixed(1)+'%'}</b><span>Non-qualifying candidates left untraded</span></div>
+      </div>
+    </div>
+    <div className="rev-efficiency-note"><b>Efficiency rule:</b> use fewer scans and fewer trades where possible; only score confirmed setups. The meter measures observed paper performance and selectivity—it does not claim to measure actual computing energy or guarantee profit.</div>
+  </section>
   <p className="two-minute-disclaimer">This is a curated starter universe, not every instrument listed worldwide. Provider symbol coverage and data limits apply. VWAP uses the returned 60-candle window, not guaranteed full-session VWAP; forex volume may be unavailable. Learning records pattern outcome statistics locally; it does not retrain a predictive AI model. Paper simulation only, no broker orders or guaranteed performance.</p>
  </section>
 }
