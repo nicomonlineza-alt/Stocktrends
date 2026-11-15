@@ -1,0 +1,164 @@
+{
+  "partOne": true,
+  "sourceTable": "public.learning_review_runs",
+  "exportedAt": "2026-11-15T13:53:00+02:00",
+  "count": 9,
+  "reviews": [
+    {
+      "id": "7b5a2014-05c8-4038-bdfd-93fe91ad0ef8",
+      "source": "green-review",
+      "summary": "No usable 15-minute candle observations were returned. Check provider access and try again.",
+      "patterns": [],
+      "created_at": "2026-10-31T20:41:36.533541+00:00",
+      "methodology": "Completed 15-minute candles; next-candle outcomes; candle direction, momentum, Bollinger proximity and volatility; completed Green paper-session results. Correlations are not profit forecasts.",
+      "sample_count": 0,
+      "unavailable_count": 20,
+      "optimisation_score": 0
+    },
+    {
+      "id": "4b85cc52-bdca-4b4a-a931-899203b4004d",
+      "source": "green-review",
+      "summary": "Reviewed 624 next-candle outcomes across 8 available instruments. Most promising historical conditions: Near upper Bollinger Band, Near lower Bollinger Band. No completed Green sessions yet; findings are preliminary.",
+      "patterns": [
+        {
+          "name": "Near upper Bollinger Band",
+          "upRate": 38.88888888888889,
+          "samples": 54,
+          "avgNextMove": -0.4210422435172428,
+          "directionalAccuracy": 61.111111111111114
+        },
+        {
+          "name": "Near lower Bollinger Band",
+          "upRate": 55.633802816901415,
+          "samples": 142,
+          "avgNextMove": -0.014043858866433724,
+          "directionalAccuracy": 55.633802816901415
+        },
+        {
+          "name": "Lower volatility",
+          "upRate": 48.17351598173516,
+          "samples": 438,
+          "avgNextMove": -0.023073343096915656,
+          "directionalAccuracy": 51.82648401826484
+        },
+        {
+          "name": "Upward momentum",
+          "upRate": 48.333333333333336,
+          "samples": 300,
+          "avgNextMove": -0.08539273702134306,
+          "directionalAccuracy": 51.66666666666667
+        },
+        {
+          "name": "Bearish candle",
+          "upRate": 48.580441640378545,
+          "samples": 317,
+          "avgNextMove": -0.03970536959796799,
+          "directionalAccuracy": 51.419558359621455
+        },
+        {
+          "name": "Higher volatility",
+          "upRate": 51.075268817204304,
+          "samples": 186,
+          "avgNextMove": -0.12548548505534288,
+          "directionalAccuracy": 51.075268817204304
+        },
+        {
+          "name": "Bullish candle",
+          "upRate": 49.504950495049506,
+          "samples": 303,
+          "avgNextMove": -0.06742513874074761,
+          "directionalAccuracy": 50.495049504950494
+        },
+        {
+          "name": "Downward momentum",
+          "upRate": 49.691358024691354,
+          "samples": 324,
+          "avgNextMove": -0.02416235614302439,
+          "directionalAccuracy": 50.308641975308646
+        }
+      ],
+      "created_at": "2026-11-01T11:40:27.005024+00:00",
+      "methodology": "Completed 15-minute candles; next-candle outcomes; candle direction, momentum, Bollinger proximity and volatility; completed Green paper-session results. Correlations are not profit forecasts.",
+      "sample_count": 624,
+      "unavailable_count": 12,
+      "optimisation_score": 76
+    },
+    {
+      "id": "dc1bb27a-2bc6-4a41-9f44-7af8dfb84d2a",
+      "source": "green-review",
+      "summary": "No usable 15-minute candle observations were returned. Check provider access and try again.",
+      "patterns": [],
+      "created_at": "2026-11-01T12:30:57.002459+00:00",
+      "methodology": "Completed 15-minute candles; next-candle outcomes; candle direction, momentum, Bollinger proximity and volatility; completed Green paper-session results. Correlations are not profit forecasts.",
+      "sample_count": 0,
+      "unavailable_count": 20,
+      "optimisation_score": 0
+    },
+    {
+      "id": "509af903-f0d3-46a1-9f74-1a1f4b712cf5",
+      "source": "green-review",
+      "summary": "No usable 15-minute candle observations were returned. Check provider access and try again.",
+      "patterns": [],
+      "created_at": "2026-11-01T12:47:24.294098+00:00",
+      "methodology": "Completed 15-minute candles; next-candle outcomes; candle direction, momentum, Bollinger proximity and volatility; completed Green paper-session results. Correlations are not profit forecasts.",
+      "sample_count": 0,
+      "unavailable_count": 20,
+      "optimisation_score": 0
+    },
+    {
+      "id": "879dd3d5-0dd0-46b1-bede-502e17389a0a",
+      "source": "green-review",
+      "summary": "No usable 15-minute candle observations were returned. Check provider access and try again.",
+      "patterns": [],
+      "created_at": "2026-11-01T17:55:36.326878+00:00",
+      "methodology": "Completed 15-minute candles; next-candle outcomes; candle direction, momentum, Bollinger proximity and volatility; completed Green paper-session results. Correlations are not profit forecasts.",
+      "sample_count": 0,
+      "unavailable_count": 20,
+      "optimisation_score": 0
+    },
+    {
+      "id": "8a5cb3ac-5abf-4448-918d-689313682d95",
+      "source": "green-review",
+      "summary": "No usable 15-minute candle observations were returned. Check provider access and try again.",
+      "patterns": [],
+      "created_at": "2026-11-01T17:58:45.529014+00:00",
+      "methodology": "Completed 15-minute candles; next-candle outcomes; candle direction, momentum, Bollinger proximity and volatility; completed Green paper-session results. Correlations are not profit forecasts.",
+      "sample_count": 0,
+      "unavailable_count": 20,
+      "optimisation_score": 0
+    },
+    {
+      "id": "575855ed-04b1-435b-b98e-a9e40654cba0",
+      "source": "green-review",
+      "summary": "No usable 15-minute candle observations were returned. Check provider access and try again.",
+      "patterns": [],
+      "created_at": "2026-11-02T07:39:23.980216+00:00",
+      "methodology": "Completed 15-minute candles; next-candle outcomes; candle direction, momentum, Bollinger proximity and volatility; completed Green paper-session results. Correlations are not profit forecasts.",
+      "sample_count": 0,
+      "unavailable_count": 20,
+      "optimisation_score": 0
+    },
+    {
+      "id": "437c967d-ac56-47dd-95a1-bb49ff55caae",
+      "source": "green-review",
+      "summary": "No usable 15-minute candle observations were returned. Check provider access and try again.",
+      "patterns": [],
+      "created_at": "2026-11-02T08:58:55.749115+00:00",
+      "methodology": "Completed 15-minute candles; next-candle outcomes; candle direction, momentum, Bollinger proximity and volatility; completed Green paper-session results. Correlations are not profit forecasts.",
+      "sample_count": 0,
+      "unavailable_count": 20,
+      "optimisation_score": 0
+    },
+    {
+      "id": "3d032d63-7ba3-4e04-a896-4e06e150d2c3",
+      "source": "green-review",
+      "summary": "No usable 15-minute candle observations were returned. Check provider access and try again.",
+      "patterns": [],
+      "created_at": "2026-11-03T10:05:41.451755+00:00",
+      "methodology": "Completed 15-minute candles; next-candle outcomes; candle direction, momentum, Bollinger proximity and volatility; completed Green paper-session results. Correlations are not profit forecasts.",
+      "sample_count": 0,
+      "unavailable_count": 20,
+      "optimisation_score": 0
+    }
+  ]
+}
