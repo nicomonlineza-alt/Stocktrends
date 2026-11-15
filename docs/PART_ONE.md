@@ -12,10 +12,10 @@ Part One is the existing research and learning baseline. The application must co
 - The AI Suggestions workflow stores initial candidate scores, indicator snapshots, five-symbol observation results, timestamps, and chart points in that journal.
 - Manual Learn snapshots store the selected timeframe, symbol, score, movement, and indicator values.
 - The app also has a paper-trading journal / R100 challenge history and Supabase cloud-learning history from earlier project milestones.
-- Earlier connected Supabase records included paper-trading sessions/observations and `learning_review_runs`; historical context recorded 60 journal events as of 2026-10-31.
+- The connected Supabase project `stocktrends-learning` was checked read-only on 2026-11-15. Its `public.learning_journal_events` table contained **418 rows**, and `public.learning_review_runs` contained **9 rows**. All 418 journal events and all 9 review runs were exported into the Part One archive files listed below; the `user_id` field was omitted from the exported copies.
 - Browser-local records remain tied to the browser/device. Do not clear local storage, reset the database, or overwrite existing journal keys during Part Two.
 
-**Important:** GitHub cannot read data held only in the user's browser or private Supabase project. This file preserves the documented learning method and history schema; it does not claim to contain every private browser journal row. The original app and its storage keys must remain intact so those records remain accessible.
+**Important:** The 418 cloud journal events and 9 cloud review runs are archived in `docs/part-one-data/`. The browser-only `stocktrends-ai-suggestions-learning-v1` journal cannot be read from GitHub or Supabase; it remains in the user's browser and is preserved by leaving the existing application storage key untouched. Export that browser journal separately from the app if a complete cross-device archive is required.
 
 ## 2. Indicators already learned / measured
 
